@@ -1,0 +1,168 @@
+/* 加载屏幕样式 */
+.loading-screen {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+.loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  text-align: center;
+  animation: fadeInUp 0.8s ease-out;
+}
+
+.loading-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.loading-logo svg {
+  filter: drop-shadow(0 8px 24px rgba(255, 255, 255, 0.3));
+}
+
+.loading-text {
+  color: white;
+}
+
+.loading-text h2 {
+  font-size: 32px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.loading-text p {
+  font-size: 16px;
+  margin: 0;
+  opacity: 0.9;
+  font-weight: 500;
+}
+
+/* Ant Design Spin 组件样式覆盖 */
+.loading-screen .ant-spin {
+  color: white;
+}
+
+.loading-screen .ant-spin-dot-item {
+  background-color: white;
+}
+
+.loading-screen .ant-spin-lg .ant-spin-dot {
+  font-size: 32px;
+}
+
+/* 动画效果 */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .loading-content {
+    gap: 24px;
+  }
+
+  .loading-logo svg {
+    width: 48px;
+    height: 48px;
+  }
+
+  .loading-text h2 {
+    font-size: 28px;
+  }
+
+  .loading-text p {
+    font-size: 14px;
+  }
+
+  .loading-screen .ant-spin-lg .ant-spin-dot {
+    font-size: 28px;
+  }
+}
+
+@media (max-width: 480px) {
+  .loading-content {
+    gap: 20px;
+    padding: 20px;
+  }
+
+  .loading-logo svg {
+    width: 40px;
+    height: 40px;
+  }
+
+  .loading-text h2 {
+    font-size: 24px;
+  }
+
+  .loading-text p {
+    font-size: 13px;
+  }
+
+  .loading-screen .ant-spin-lg .ant-spin-dot {
+    font-size: 24px;
+  }
+}
+
+/* 暗黑模式 */
+.dark .loading-screen {
+  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+}
+
+/* 高对比度模式 */
+@media (prefers-contrast: high) {
+  .loading-screen {
+    background: #000000;
+  }
+
+  .loading-text {
+    color: #ffffff;
+  }
+}
+
+/* 减少动画模式 */
+@media (prefers-reduced-motion: reduce) {
+  .loading-content,
+  .loading-logo {
+    animation: none;
+  }
+}
+
+/* 打印模式 */
+@media print {
+  .loading-screen {
+    display: none !important;
+  }
+}

@@ -1,0 +1,2158 @@
+openapi: 3.0.3
+info:
+  title: Cost-RAG 工程造价咨询智能RAG系统 API
+  description: |
+    Cost-RAG是基于成本优化的检索增强生成系统，专为工程造价咨询行业设计。
+    提供文档处理、智能问答、成本估算和多项目对比等核心功能。
+
+    ## 主要特性
+    - 🔍 支持多格式文档处理和智能检索
+    - 💰 14级分部分项层级成本计算
+    - 📊 多项目对比分析和相似性评估
+    - 🤖 基于RAG的智能问答系统
+    - 🚀 高性能异步处理架构
+
+    ## 认证方式
+    使用JWT Bearer Token进行认证，在请求头中添加：
+    ```
+    Authorization: Bearer <your_jwt_token>
+    ```
+
+    ## 错误处理
+    所有错误响应都遵循统一格式：
+    ```json
+    {
+      "success": false,
+      "error": {
+        "code": "ERROR_CODE",
+        "message": "错误描述",
+        "details": []
+      }
+    }
+    ```
+  version: 1.0.0
+  contact:
+    name: Cost-RAG开发团队
+    email: support@cost-rag.com
+    url: https://cost-rag.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: http://localhost:8000/api/v1
+    description: 开发环境
+  - url: https://api.cost-rag.com/api/v1
+    description: 生产环境
+
+paths:
+  # 认证相关
+  /auth/login:
+    post:
+      tags:
+        - 认证管理
+      summary: 用户登录
+      description: 用户身份认证，返回JWT访问令牌
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /auth/refresh:
+    post:
+      tags:
+        - 认证管理
+      summary: 刷新访问令牌
+      description: 使用刷新令牌获取新的访问令牌
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: 令牌刷新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshTokenResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # 文档处理
+  /documents/upload:
+    post:
+      tags:
+        - 文档处理
+      summary: 上传文档
+      description: |
+        上传并处理文档文件，支持PDF、Excel、Word、PPT等格式。
+        系统将自动进行OCR识别、文本提取、分块处理和向量化存储。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DocumentUploadRequest'
+      responses:
+        '201':
+          description: 文档上传成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '413':
+          description: 文件大小超出限制
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /documents:
+    get:
+      tags:
+        - 文档处理
+      summary: 获取文档列表
+      description: 分页获取用户文档列表，支持搜索和过滤
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - $ref: '#/components/parameters/SearchParam'
+        - name: document_type
+          in: query
+          description: 文档类型过滤
+          schema:
+            type: string
+            enum: [cost_template, industry_report, specification, drawing]
+        - name: project_id
+          in: query
+          description: 项目ID过滤
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentListResponse'
+
+  /documents/{document_id}:
+    get:
+      tags:
+        - 文档处理
+      summary: 获取文档详情
+      description: 获取指定文档的详细信息，包括处理状态和提取的实体
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          description: 文档ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags:
+        - 文档处理
+      summary: 删除文档
+      description: 删除指定文档及其相关的向量化数据
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: document_id
+          in: path
+          required: true
+          description: 文档ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: 删除成功
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # 成本估算
+  /estimates:
+    post:
+      tags:
+        - 成本估算
+      summary: 创建成本估算
+      description: |
+        基于项目参数创建新的成本估算，使用14级层级递归计算算法。
+        系统将自动选择合适的成本模板并进行质量调整。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEstimateRequest'
+      responses:
+        '201':
+          description: 估算创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateEstimateResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+    get:
+      tags:
+        - 成本估算
+      summary: 获取估算列表
+      description: 分页获取成本估算列表，支持项目类型和状态过滤
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+        - name: project_type
+          in: query
+          description: 项目类型过滤
+          schema:
+            type: string
+            enum: [office, residential, commercial, mixed]
+        - name: status
+          in: query
+          description: 估算状态过滤
+          schema:
+            type: string
+            enum: [draft, processing, completed, failed]
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstimateListResponse'
+
+  /estimates/{estimate_id}:
+    get:
+      tags:
+        - 成本估算
+      summary: 获取估算详情
+      description: 获取成本估算的详细信息，包括完整的14级分部分项分解
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: estimate_id
+          in: path
+          required: true
+          description: 估算ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstimateDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    put:
+      tags:
+        - 成本估算
+      summary: 更新估算
+      description: 更新成本估算的项目参数，系统将重新计算成本分解
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: estimate_id
+          in: path
+          required: true
+          description: 估算ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEstimateRequest'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EstimateDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /estimates/{estimate_id}/export:
+    get:
+      tags:
+        - 成本估算
+      summary: 导出估算
+      description: 将成本估算导出为Excel或Markdown格式
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: estimate_id
+          in: path
+          required: true
+          description: 估算ID
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          required: true
+          description: 导出格式
+          schema:
+            type: string
+            enum: [excel, markdown]
+        - name: template
+          in: query
+          description: 导出模板样式
+          schema:
+            type: string
+            enum: [standard, detailed, summary]
+            default: standard
+      responses:
+        '200':
+          description: 导出成功
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            text/markdown:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # 多项目对比
+  /comparisons/upload:
+    post:
+      tags:
+        - 多项目对比
+      summary: 上传对比文件
+      description: |
+        上传多项目对比Excel文件，系统将自动解析项目数据、
+        验证数学关系并生成对比分析。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: 多项目对比Excel文件
+      responses:
+        '201':
+          description: 文件处理成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComparisonUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /comparisons/{comparison_id}:
+    get:
+      tags:
+        - 多项目对比
+      summary: 获取对比详情
+      description: 获取多项目对比的详细数据和验证结果
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: comparison_id
+          in: path
+          required: true
+          description: 对比ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComparisonDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /comparisons/{comparison_id}/analyze:
+    post:
+      tags:
+        - 多项目对比
+      summary: 分析项目相似性
+      description: |
+        基于目标项目参数分析与对比库中项目的相似性，
+        生成成本调整建议和风险评估。
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: comparison_id
+          in: path
+          required: true
+          description: 对比ID
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SimilarityAnalysisRequest'
+      responses:
+        '200':
+          description: 分析完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimilarityAnalysisResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  # RAG查询
+  /queries:
+    post:
+      tags:
+        - RAG查询
+      summary: 提交智能查询
+      description: |
+        提交自然语言查询，系统使用RAG技术检索相关文档
+        并生成智能回答，支持上下文对话。
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '201':
+          description: 查询提交成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /queries/{query_id}:
+    get:
+      tags:
+        - RAG查询
+      summary: 获取查询结果
+      description: 获取查询的详细结果，包括回答、来源文档和置信度
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: query_id
+          in: path
+          required: true
+          description: 查询ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /queries/{query_id}/sources:
+    get:
+      tags:
+        - RAG查询
+      summary: 获取查询来源
+      description: 获取查询答案的来源文档列表和相关性评分
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: query_id
+          in: path
+          required: true
+          description: 查询ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuerySourcesResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # 知识库
+  /knowledge/entities:
+    get:
+      tags:
+        - 知识库
+      summary: 获取知识图谱实体
+      description: 获取知识图谱中的实体列表，支持类型过滤
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: entity_type
+          in: query
+          description: 实体类型过滤
+          schema:
+            type: string
+            enum: [material, process, quota, regulation]
+        - name: search
+          in: query
+          description: 实体名称搜索
+          schema:
+            type: string
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/SizeParam'
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EntityListResponse'
+
+  /knowledge/search:
+    get:
+      tags:
+        - 知识库
+      summary: 语义搜索
+      description: 在知识库中进行语义搜索，返回相关的文档片段
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: 搜索关键词
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: 返回结果数量限制
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 50
+        - name: threshold
+          in: query
+          description: 相似度阈值
+          schema:
+            type: number
+            format: float
+            default: 0.7
+            minimum: 0
+            maximum: 1
+      responses:
+        '200':
+          description: 搜索成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SemanticSearchResponse'
+
+  # 成本模板
+  /templates:
+    get:
+      tags:
+        - 成本模板
+      summary: 获取成本模板列表
+      description: 获取可用的成本模板列表，支持地区和类型过滤
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: region
+          in: query
+          description: 地区过滤
+          schema:
+            type: string
+        - name: project_type
+          in: query
+          description: 项目类型过滤
+          schema:
+            type: string
+            enum: [office, residential, commercial, mixed]
+        - name: is_active
+          in: query
+          description: 是否只返回激活模板
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateListResponse'
+
+    post:
+      tags:
+        - 成本模板
+      summary: 创建成本模板
+      description: 创建新的成本模板，需要管理员权限
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateRequest'
+      responses:
+        '201':
+          description: 模板创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateDetailResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /templates/{template_id}:
+    get:
+      tags:
+        - 成本模板
+      summary: 获取模板详情
+      description: 获取成本模板的详细信息，包括分部分项结构
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: template_id
+          in: path
+          required: true
+          description: 模板ID
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateDetailResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  # 系统监控
+  /health:
+    get:
+      tags:
+        - 系统监控
+      summary: 健康检查
+      description: 系统健康状态检查，返回各组件状态
+      responses:
+        '200':
+          description: 系统健康
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+
+  /metrics:
+    get:
+      tags:
+        - 系统监控
+      summary: 系统指标
+      description: 获取系统性能和使用指标，需要管理员权限
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # 认证相关
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          format: email
+          description: 用户邮箱
+          example: "user@example.com"
+        password:
+          type: string
+          format: password
+          description: 用户密码
+          minLength: 8
+          example: "securePassword123"
+
+    LoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            access_token:
+              type: string
+              description: JWT访问令牌
+              example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+            refresh_token:
+              type: string
+              description: 刷新令牌
+              example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+            token_type:
+              type: string
+              example: "Bearer"
+            expires_in:
+              type: integer
+              description: 访问令牌过期时间(秒)
+              example: 3600
+            user:
+              $ref: '#/components/schemas/UserInfo'
+
+    RefreshTokenRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          description: 刷新令牌
+
+    RefreshTokenResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            access_token:
+              type: string
+              description: 新的访问令牌
+            expires_in:
+              type: integer
+              description: 过期时间(秒)
+
+    UserInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+          format: email
+        full_name:
+          type: string
+        role:
+          type: string
+          enum: [admin, user, viewer]
+        created_at:
+          type: string
+          format: date-time
+
+    # 文档处理相关
+    DocumentUploadRequest:
+      type: object
+      required:
+        - file
+      properties:
+        file:
+          type: string
+          format: binary
+          description: 上传的文档文件
+        document_type:
+          type: string
+          enum: [cost_template, industry_report, specification, drawing, other]
+          default: other
+          description: 文档类型分类
+        project_id:
+          type: string
+          format: uuid
+          description: 关联的项目ID(可选)
+        description:
+          type: string
+          description: 文档描述(可选)
+
+    DocumentUploadResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            document_id:
+              type: string
+              format: uuid
+            filename:
+              type: string
+              example: "工程造价标准.pdf"
+            file_size:
+              type: integer
+              example: 2048576
+            document_type:
+              type: string
+              example: "cost_template"
+            processing_status:
+              type: string
+              enum: [uploaded, processing, completed, failed]
+              example: "processing"
+            upload_time:
+              type: string
+              format: date-time
+            estimated_processing_time:
+              type: integer
+              description: 预估处理时间(秒)
+              example: 120
+
+    DocumentListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            documents:
+              type: array
+              items:
+                $ref: '#/components/schemas/DocumentSummary'
+            pagination:
+              $ref: '#/components/schemas/PaginationInfo'
+
+    DocumentSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        file_type:
+          type: string
+        document_type:
+          type: string
+        file_size:
+          type: integer
+        processing_status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        project_name:
+          type: string
+          description: 关联的项目名称(如果有)
+
+    DocumentDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            document:
+              $ref: '#/components/schemas/DocumentSummary'
+            extracted_text:
+              type: string
+              description: 提取的文本内容(部分)
+            chunk_count:
+              type: integer
+              description: 分块数量
+            entities_extracted:
+              type: array
+              items:
+                $ref: '#/components/schemas/ExtractedEntity'
+            processing_details:
+              type: object
+              properties:
+                ocr_confidence:
+                  type: number
+                  format: float
+                parsing_method:
+                  type: string
+                language_detected:
+                  type: string
+
+    ExtractedEntity:
+      type: object
+      properties:
+        entity_type:
+          type: string
+          enum: [material, process, quota, regulation, company, location]
+        entity_name:
+          type: string
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        position:
+          type: object
+          properties:
+            start:
+              type: integer
+            end:
+              type: integer
+        context:
+          type: string
+          description: 实体上下文
+
+    # 成本估算相关
+    CreateEstimateRequest:
+      type: object
+      required:
+        - project_name
+        - project_type
+        - area
+      properties:
+        project_name:
+          type: string
+          description: 项目名称
+          example: "商业综合体项目"
+          minLength: 2
+          maxLength: 255
+        project_type:
+          type: string
+          enum: [office, residential, commercial, mixed]
+          description: 项目类型
+        area:
+          type: number
+          format: float
+          description: 建筑面积(平方米)
+          minimum: 1
+          example: 50000.0
+        floors:
+          type: integer
+          description: 楼层数
+          minimum: 1
+          maximum: 200
+          example: 25
+        quality_level:
+          type: string
+          enum: [low, medium, high]
+          default: medium
+          description: 质量等级
+        location:
+          type: string
+          description: 项目位置
+          example: "北京市朝阳区"
+          maxLength: 255
+        template_id:
+          type: string
+          format: uuid
+          description: 指定的成本模板ID(可选)
+        description:
+          type: string
+          description: 项目描述
+          maxLength: 1000
+
+    CreateEstimateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            estimate_id:
+              type: string
+              format: uuid
+            project_name:
+              type: string
+            status:
+              type: string
+              enum: [draft, processing, completed, failed]
+            estimated_completion_time:
+              type: integer
+              description: 预估完成时间(秒)
+            created_at:
+              type: string
+              format: date-time
+
+    EstimateListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            estimates:
+              type: array
+              items:
+                $ref: '#/components/schemas/EstimateSummary'
+            pagination:
+              $ref: '#/components/schemas/PaginationInfo'
+
+    EstimateSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_name:
+          type: string
+        project_type:
+          type: string
+        area:
+          type: number
+          format: float
+        status:
+          type: string
+        total_cost:
+          type: number
+          format: float
+          description: 总造价(元)
+        unit_cost:
+          type: number
+          format: float
+          description: 单方造价(元/平米)
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    EstimateDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            estimate:
+              $ref: '#/components/schemas/EstimateSummary'
+            breakdown:
+              $ref: '#/components/schemas/CostBreakdown'
+            template_used:
+              type: object
+              properties:
+                template_id:
+                  type: string
+                  format: uuid
+                template_name:
+                  type: string
+                region:
+                  type: string
+            validation_results:
+              $ref: '#/components/schemas/ValidationResults'
+            calculation_metadata:
+              type: object
+              properties:
+                calculation_method:
+                  type: string
+                  example: "hierarchical_14_level"
+                processing_time:
+                  type: number
+                  format: float
+                quality_adjustments:
+                  type: object
+                  additionalProperties:
+                    type: number
+
+    CostBreakdown:
+      type: object
+      properties:
+        total_cost:
+          type: number
+          format: float
+          description: 总造价(元)
+        unit_cost:
+          type: number
+          format: float
+          description: 单方造价(元/平米)
+        primary_sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/PrimarySection'
+        secondary_sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/SecondarySection'
+
+    PrimarySection:
+      type: object
+      properties:
+        section_code:
+          type: string
+          example: "1.0"
+        section_name:
+          type: string
+          example: "土石方工程"
+        unit_price:
+          type: number
+          format: float
+          description: 单方造价(元/平米)
+        total_cost:
+          type: number
+          format: float
+          description: 合价(元)
+        cost_ratio:
+          type: number
+          format: float
+          description: 占总造价比例
+        secondary_sections_count:
+          type: integer
+          description: 包含的二级分部数量
+
+    SecondarySection:
+      type: object
+      properties:
+        section_code:
+          type: string
+          example: "2.1"
+        section_name:
+          type: string
+          example: "土方开挖"
+        primary_section_code:
+          type: string
+          example: "2.0"
+        unit_price:
+          type: number
+          format: float
+        total_cost:
+          type: number
+          format: float
+        cost_breakdown:
+          type: object
+          properties:
+            material_cost:
+              type: number
+              format: float
+            labor_cost:
+              type: number
+              format: float
+            equipment_cost:
+              type: number
+              format: float
+
+    UpdateEstimateRequest:
+      type: object
+      properties:
+        project_name:
+          type: string
+          minLength: 2
+          maxLength: 255
+        area:
+          type: number
+          format: float
+          minimum: 1
+        quality_level:
+          type: string
+          enum: [low, medium, high]
+        floors:
+          type: integer
+          minimum: 1
+          maximum: 200
+        location:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 1000
+
+    # 多项目对比相关
+    ComparisonUploadResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            comparison_id:
+              type: string
+              format: uuid
+            filename:
+              type: string
+            projects_extracted:
+              type: array
+              items:
+                $ref: '#/components/schemas/ExtractedProject'
+            validation_results:
+              $ref: '#/components/schemas/ValidationResults'
+            processing_time:
+              type: number
+              format: float
+              description: 处理时间(秒)
+
+    ExtractedProject:
+      type: object
+      properties:
+        project_name:
+          type: string
+          example: "金地商业项目"
+        area:
+          type: number
+          format: float
+          example: 89727.0
+        total_cost:
+          type: number
+          format: float
+          example: 450000000.0
+        unit_cost:
+          type: number
+          format: float
+          example: 5014.5
+        quality_level:
+          type: string
+          example: "中"
+        floors:
+          type: integer
+        completion_date:
+          type: string
+          format: date
+        location:
+          type: string
+
+    ComparisonDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            comparison:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                filename:
+                  type: string
+                upload_date:
+                  type: string
+                  format: date-time
+            projects:
+              type: array
+              items:
+                $ref: '#/components/schemas/ProjectComparisonData'
+            validation_summary:
+              $ref: '#/components/schemas/ValidationResults'
+
+    ProjectComparisonData:
+      type: object
+      properties:
+        project_name:
+          type: string
+        basic_info:
+          type: object
+          properties:
+            area:
+              type: number
+              format: float
+            floors:
+              type: integer
+            quality_level:
+              type: string
+            completion_date:
+              type: string
+              format: date
+        cost_breakdown:
+          type: array
+          items:
+            type: object
+            properties:
+              section_code:
+                type: string
+              section_name:
+                type: string
+              unit_cost:
+                type: number
+                format: float
+              total_cost:
+                type: number
+                format: float
+
+    SimilarityAnalysisRequest:
+      type: object
+      required:
+        - target_project
+      properties:
+        target_project:
+          type: object
+          required:
+            - area
+            - project_type
+          properties:
+            area:
+              type: number
+              format: float
+              minimum: 1
+              example: 60000.0
+            project_type:
+              type: string
+              enum: [office, residential, commercial, mixed]
+              example: "commercial"
+            location:
+              type: string
+              example: "上海市浦东新区"
+            quality_level:
+              type: string
+              enum: [low, medium, high]
+              example: "high"
+            floors:
+              type: integer
+              example: 30
+        analysis_options:
+          type: object
+          properties:
+            similarity_threshold:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 1
+              default: 0.7
+            max_results:
+              type: integer
+              minimum: 1
+              maximum: 20
+              default: 10
+            include_cost_analysis:
+              type: boolean
+              default: true
+
+    SimilarityAnalysisResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            analysis_id:
+              type: string
+              format: uuid
+            target_project:
+              type: object
+              properties:
+                area:
+                  type: number
+                  format: float
+                project_type:
+                  type: string
+                location:
+                  type: string
+            similar_projects:
+              type: array
+              items:
+                $ref: '#/components/schemas/SimilarProject'
+            cost_analysis:
+              $ref: '#/components/schemas/CostAnalysisSummary'
+            recommendations:
+              type: array
+              items:
+                $ref: '#/components/schemas/CostRecommendation'
+
+    SimilarProject:
+      type: object
+      properties:
+        project_name:
+          type: string
+        similarity_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        area_difference:
+          type: number
+          format: float
+          description: 面积差异百分比
+        cost_comparison:
+          type: object
+          properties:
+            unit_cost_difference:
+              type: number
+              format: float
+              description: 单方造价差异(元/平米)
+            total_cost_estimated:
+              type: number
+              format: float
+              description: 基于目标面积的估算总造价
+        similarity_factors:
+          type: array
+          items:
+            type: object
+            properties:
+              factor:
+                type: string
+                example: "项目类型"
+              score:
+                type: number
+                format: float
+              weight:
+                type: number
+                format: float
+
+    CostAnalysisSummary:
+      type: object
+      properties:
+            market_average_unit_cost:
+              type: number
+              format: float
+              description: 市场平均单方造价
+            target_project_estimate:
+              type: object
+              properties:
+                unit_cost:
+                  type: number
+                  format: float
+                total_cost:
+                  type: number
+                  format: float
+            cost_range:
+              type: object
+              properties:
+                minimum:
+                  type: number
+                  format: float
+                maximum:
+                  type: number
+                  format: float
+                average:
+                  type: number
+                  format: float
+            confidence_level:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 1
+
+    CostRecommendation:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [cost_optimization, risk_alert, market_insight]
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum: [high, medium, low]
+        potential_savings:
+          type: number
+          format: float
+          description: 潜在节约金额(元)
+        action_items:
+          type: array
+          items:
+            type: string
+
+    # RAG查询相关
+    QueryRequest:
+      type: object
+      required:
+        - question
+      properties:
+        question:
+          type: string
+          description: 查询问题
+          minLength: 5
+          maxLength: 1000
+          example: "混凝土C30的单价是多少？"
+        context_type:
+          type: string
+          enum: [cost_estimation, material_info, regulation, general]
+          default: general
+          description: 查询上下文类型
+        max_results:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+          description: 最大检索结果数量
+        include_sources:
+          type: boolean
+          default: true
+          description: 是否包含来源信息
+        conversation_id:
+          type: string
+          format: uuid
+          description: 对话ID(用于上下文连续性)
+
+    QueryResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            query_id:
+              type: string
+              format: uuid
+            question:
+              type: string
+            status:
+              type: string
+              enum: [processing, completed, failed]
+            created_at:
+              type: string
+              format: date-time
+            estimated_completion_time:
+              type: integer
+              description: 预估完成时间(秒)
+
+    QueryDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            query:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                question:
+                  type: string
+                status:
+                  type: string
+                created_at:
+                  type: string
+                  format: date-time
+                completed_at:
+                  type: string
+                  format: date-time
+            answer:
+              type: object
+              properties:
+                content:
+                  type: string
+                  description: 生成的回答内容
+                confidence_score:
+                  type: number
+                  format: float
+                  minimum: 0
+                  maximum: 1
+                sources_cited:
+                  type: integer
+                  description: 引用的来源数量
+                response_time:
+                  type: number
+                  format: float
+                  description: 响应时间(秒)
+            sources:
+              type: array
+              items:
+                $ref: '#/components/schemas/QuerySource'
+            metadata:
+              type: object
+              properties:
+                retrieval_method:
+                  type: string
+                  enum: [hybrid, semantic, keyword]
+                model_used:
+                  type: string
+                tokens_used:
+                  type: integer
+
+    QuerySource:
+      type: object
+      properties:
+        document_id:
+          type: string
+          format: uuid
+        document_name:
+          type: string
+        chunk_content:
+          type: string
+          description: 相关文本片段
+        relevance_score:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        position:
+          type: object
+          properties:
+            page:
+              type: integer
+            section:
+              type: string
+
+    QuerySourcesResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            query_id:
+              type: string
+              format: uuid
+            sources:
+              type: array
+              items:
+                $ref: '#/components/schemas/QuerySource'
+            total_sources:
+              type: integer
+
+    # 知识库相关
+    EntityListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            entities:
+              type: array
+              items:
+                $ref: '#/components/schemas/KnowledgeEntity'
+            pagination:
+              $ref: '#/components/schemas/PaginationInfo'
+
+    KnowledgeEntity:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        entity_name:
+          type: string
+        entity_type:
+          type: string
+          enum: [material, process, quota, regulation, company, location]
+        description:
+          type: string
+        confidence_score:
+          type: number
+          format: float
+        source_count:
+          type: integer
+          description: 来源文档数量
+        related_entities:
+          type: array
+          items:
+            type: object
+            properties:
+              entity_name:
+                type: string
+              relationship_type:
+                type: string
+              strength:
+                type: number
+                format: float
+
+    SemanticSearchResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            query:
+              type: string
+            results:
+              type: array
+              items:
+                type: object
+                properties:
+                  content:
+                    type: string
+                  document_name:
+                    type: string
+                  relevance_score:
+                    type: number
+                    format: float
+                  chunk_id:
+                    type: string
+                    format: uuid
+            search_metadata:
+              type: object
+              properties:
+                total_results:
+                  type: integer
+                search_time:
+                  type: number
+                  format: float
+                threshold_used:
+                  type: number
+                  format: float
+
+    # 成本模板相关
+    TemplateListResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            templates:
+              type: array
+              items:
+                $ref: '#/components/schemas/CostTemplate'
+            pagination:
+              $ref: '#/components/schemas/PaginationInfo'
+
+    CostTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        template_type:
+          type: string
+        region:
+          type: string
+        base_year:
+          type: integer
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        projects_count:
+          type: integer
+          description: 使用该模板的项目数量
+
+    CreateTemplateRequest:
+      type: object
+      required:
+        - name
+        - region
+        - base_year
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 255
+        template_type:
+          type: string
+          enum: [government, enterprise, custom]
+        region:
+          type: string
+          maxLength: 100
+        base_year:
+          type: integer
+          minimum: 2000
+          maximum: 2030
+        description:
+          type: string
+          maxLength: 1000
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateSection'
+
+    TemplateSection:
+      type: object
+      required:
+        - section_code
+        - section_name
+        - section_level
+      properties:
+        section_code:
+          type: string
+          example: "1.0"
+        section_name:
+          type: string
+          example: "土石方工程"
+        section_level:
+          type: integer
+          enum: [1, 2]
+        parent_section_code:
+          type: string
+        base_unit_price:
+          type: number
+          format: float
+          minimum: 0
+        unit:
+          type: string
+          example: "元/平米"
+        description:
+          type: string
+
+    TemplateDetailResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          $ref: '#/components/schemas/CostTemplateDetail'
+
+    CostTemplateDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        template_type:
+          type: string
+        region:
+          type: string
+        base_year:
+          type: integer
+        is_active:
+          type: boolean
+        description:
+          type: string
+        sections:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateSection'
+        usage_statistics:
+          type: object
+          properties:
+            projects_count:
+              type: integer
+            last_used:
+              type: string
+              format: date-time
+            average_accuracy:
+              type: number
+              format: float
+
+    # 系统监控相关
+    HealthCheckResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        components:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:
+                type: string
+                enum: [healthy, unhealthy]
+              response_time:
+                type: number
+                format: float
+              last_check:
+                type: string
+                format: date-time
+        version:
+          type: string
+        uptime:
+          type: number
+          description: 运行时间(秒)
+
+    MetricsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          properties:
+            system_metrics:
+              type: object
+              properties:
+                cpu_usage:
+                  type: number
+                  format: float
+                memory_usage:
+                  type: number
+                  format: float
+                disk_usage:
+                  type: number
+                  format: float
+            api_metrics:
+              type: object
+              properties:
+                requests_per_minute:
+                  type: number
+                average_response_time:
+                  type: number
+                  format: float
+                error_rate:
+                  type: number
+                  format: float
+            business_metrics:
+              type: object
+              properties:
+                total_documents:
+                  type: integer
+                total_estimates:
+                  type: integer
+                active_users:
+                  type: integer
+
+    # 通用组件
+    PaginationInfo:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          example: 1
+        size:
+          type: integer
+          minimum: 1
+          maximum: 100
+          example: 20
+        total:
+          type: integer
+          minimum: 0
+          example: 150
+        pages:
+          type: integer
+          minimum: 0
+          example: 8
+        has_next:
+          type: boolean
+        has_prev:
+          type: boolean
+
+    ValidationResults:
+      type: object
+      properties:
+        is_valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        mathematical_validation:
+          type: object
+          properties:
+            section_14_validation:
+              type: boolean
+            hierarchy_validations:
+              type: array
+              items:
+                type: object
+                properties:
+                  section_code:
+                    type: string
+                  is_valid:
+                    type: boolean
+                  expected_value:
+                    type: number
+                  actual_value:
+                    type: number
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              example: "VALIDATION_ERROR"
+            message:
+              type: string
+              example: "请求参数验证失败"
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+        timestamp:
+          type: string
+          format: date-time
+        request_id:
+          type: string
+          format: uuid
+
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      description: 页码，从1开始
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    SizeParam:
+      name: size
+      in: query
+      description: 每页数量，最大100
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+    SearchParam:
+      name: search
+      in: query
+      description: 搜索关键词
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 100
+
+  responses:
+    BadRequestError:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    UnauthorizedError:
+      description: 未授权访问
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    ForbiddenError:
+      description: 禁止访问
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    NotFoundError:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+    ValidationError:
+      description: 数据验证失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+tags:
+  - name: 认证管理
+    description: 用户认证和授权相关接口
+  - name: 文档处理
+    description: 文档上传、解析和管理
+  - name: 成本估算
+    description: 项目成本估算和分析
+  - name: 多项目对比
+    description: 多项目对比和相似性分析
+  - name: RAG查询
+    description: 智能问答和检索
+  - name: 知识库
+    description: 知识图谱和语义搜索
+  - name: 成本模板
+    description: 成本模板管理
+  - name: 系统监控
+    description: 系统健康检查和指标监控

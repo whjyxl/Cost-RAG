@@ -1,0 +1,444 @@
+/* 应用布局样式 */
+.app-layout {
+  min-height: 100vh;
+  background: #f8fafc;
+}
+
+.app-sider {
+  background: white !important;
+  border-right: 1px solid #e5e7eb;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
+  position: relative;
+  z-index: 10;
+}
+
+.app-logo {
+  height: 64px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid #f3f4f6;
+  background: white;
+}
+
+.logo-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-text {
+  margin-left: 12px;
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  white-space: nowrap;
+}
+
+.app-menu {
+  border-right: none !important;
+  background: white;
+  padding: 8px;
+}
+
+.app-menu .ant-menu-item {
+  margin: 4px 0;
+  border-radius: 8px !important;
+  height: 40px;
+  line-height: 40px;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.app-menu .ant-menu-item:hover {
+  background-color: #f0f9ff !important;
+  color: #2563eb !important;
+}
+
+.app-menu .ant-menu-item-selected {
+  background-color: #dbeafe !important;
+  color: #2563eb !important;
+}
+
+.app-menu .ant-menu-item-icon {
+  font-size: 18px;
+  margin-right: 12px;
+  width: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-menu .ant-menu-submenu {
+  margin: 4px 0;
+}
+
+.app-menu .ant-menu-submenu > .ant-menu-submenu-title {
+  border-radius: 8px !important;
+  height: 40px;
+  line-height: 40px;
+  display: flex;
+  align-items: center;
+  transition: all 0.2s ease;
+}
+
+.app-menu .ant-menu-submenu > .ant-menu-submenu-title:hover {
+  background-color: #f0f9ff !important;
+  color: #2563eb !important;
+}
+
+.app-menu .ant-menu-submenu-open > .ant-menu-submenu-title {
+  background-color: #dbeafe !important;
+  color: #2563eb !important;
+}
+
+.app-menu .ant-menu-submenu .ant-menu-item {
+  padding-left: 48px !important;
+  height: 36px;
+  line-height: 36px;
+}
+
+.app-main-layout {
+  background: #f8fafc;
+}
+
+.app-header {
+  background: white;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-toggle {
+  font-size: 18px;
+  color: #6b7280;
+  transition: all 0.2s ease;
+}
+
+.sidebar-toggle:hover {
+  color: #2563eb;
+  background-color: #f8fafc;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-toggle,
+.notification-btn {
+  font-size: 18px;
+  color: #6b7280;
+  transition: all 0.2s ease;
+}
+
+.theme-toggle:hover,
+.notification-btn:hover {
+  color: #2563eb;
+  background-color: #f8fafc;
+}
+
+.user-avatar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.user-avatar:hover {
+  background-color: #f8fafc;
+}
+
+.user-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-content {
+  margin: 0;
+  padding: 0;
+  min-height: calc(100vh - 64px);
+}
+
+.content-wrapper {
+  padding: 24px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* 响应式设计 */
+@media (max-width: 1200px) {
+  .content-wrapper {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 992px) {
+  .app-sider {
+    position: fixed !important;
+    height: 100vh;
+    left: 0;
+    top: 0;
+    z-index: 1001;
+  }
+
+  .app-sider.ant-layout-sider-collapsed {
+    left: -240px;
+  }
+
+  .app-main-layout {
+    margin-left: 0 !important;
+  }
+
+  .user-name {
+    display: none;
+  }
+
+  .content-wrapper {
+    padding: 16px;
+  }
+}
+
+@media (max-width: 768px) {
+  .app-header {
+    padding: 0 16px;
+  }
+
+  .header-right {
+    gap: 4px;
+  }
+
+  .content-wrapper {
+    padding: 12px;
+  }
+
+  .app-menu .ant-menu-item-icon {
+    font-size: 16px;
+    margin-right: 12px;
+  }
+
+  .app-menu .ant-menu-item {
+    height: 36px;
+    line-height: 36px;
+  }
+
+  .app-menu .ant-menu-submenu > .ant-menu-submenu-title {
+    height: 36px;
+    line-height: 36px;
+  }
+}
+
+@media (max-width: 576px) {
+  .app-logo {
+    padding: 12px;
+  }
+
+  .logo-text {
+    display: none;
+  }
+
+  .app-header {
+    padding: 0 12px;
+  }
+
+  .content-wrapper {
+    padding: 8px;
+  }
+}
+
+/* 暗黑模式 */
+.dark .app-layout {
+  background: #0f172a;
+}
+
+.dark .app-sider {
+  background: #1e293b !important;
+  border-right-color: #374151;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.2);
+}
+
+.dark .app-logo {
+  background: #1e293b;
+  border-bottom-color: #374151;
+}
+
+.dark .logo-text {
+  color: #f3f4f6;
+}
+
+.dark .app-menu {
+  background: #1e293b;
+}
+
+.dark .app-menu .ant-menu-item {
+  color: #d1d5db;
+}
+
+.dark .app-menu .ant-menu-item:hover {
+  background-color: #374151 !important;
+  color: #60a5fa !important;
+}
+
+.dark .app-menu .ant-menu-item-selected {
+  background-color: #1e3a8a !important;
+  color: #60a5fa !important;
+}
+
+.dark .app-menu .ant-menu-submenu > .ant-menu-submenu-title {
+  color: #d1d5db;
+}
+
+.dark .app-menu .ant-menu-submenu > .ant-menu-submenu-title:hover {
+  background-color: #374151 !important;
+  color: #60a5fa !important;
+}
+
+.dark .app-menu .ant-menu-submenu-open > .ant-menu-submenu-title {
+  background-color: #1e3a8a !important;
+  color: #60a5fa !important;
+}
+
+.dark .app-main-layout {
+  background: #0f172a;
+}
+
+.dark .app-header {
+  background: #1e293b;
+  border-bottom-color: #374151;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.dark .sidebar-toggle:hover {
+  color: #60a5fa;
+  background-color: #374151;
+}
+
+.dark .theme-toggle,
+.dark .notification-btn {
+  color: #9ca3af;
+}
+
+.dark .theme-toggle:hover,
+.dark .notification-btn:hover {
+  color: #60a5fa;
+  background-color: #374151;
+}
+
+.dark .user-avatar:hover {
+  background-color: #374151;
+}
+
+.dark .user-name {
+  color: #d1d5db;
+}
+
+/* 滚动条样式 */
+.app-sider::-webkit-scrollbar {
+  width: 6px;
+}
+
+.app-sider::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.app-sider::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 3px;
+}
+
+.app-sider::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.dark .app-sider::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dark .app-sider::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* 动画效果 */
+.app-sider {
+  transition: all 0.3s cubic-bezier(0.2, 0, 0, 1) 0s;
+}
+
+.app-menu .ant-menu-item {
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.app-menu .ant-menu-submenu > .ant-menu-submenu-title {
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* 徽章样式 */
+.ant-badge-count {
+  background: #ef4444;
+  color: white;
+  border: none;
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
+}
+
+/* 下拉菜单样式 */
+.ant-dropdown-menu {
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e5e7eb;
+}
+
+.ant-dropdown-menu-item {
+  border-radius: 4px;
+  margin: 4px 8px;
+  transition: all 0.2s ease;
+}
+
+.ant-dropdown-menu-item:hover {
+  background-color: #f8fafc;
+}
+
+.ant-dropdown-menu-item-danger:hover {
+  background-color: #fef2f2;
+  color: #dc2626;
+}
+
+.dark .ant-dropdown-menu {
+  background: #374151;
+  border-color: #4b5563;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+.dark .ant-dropdown-menu-item {
+  color: #d1d5db;
+}
+
+.dark .ant-dropdown-menu-item:hover {
+  background-color: #4b5563;
+}
+
+.dark .ant-dropdown-menu-item-danger:hover {
+  background-color: #7f1d1d;
+  color: #fca5a5;
+}
