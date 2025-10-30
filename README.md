@@ -992,5 +992,4 @@ for excel_file in excel_files:
 - 后端只在8000端口运行，如果有端口占用关闭再启动。
 ### 10.0项目部署环境
 - 项目部署环境为云服务器docker环境，设计框架及前后端代码是需要考虑部署生产环境的适配。
-- 云服务器：ssh -i "RAG.pem" admin@ec2-18-188-66-0.us-east-2.compute.amazonaws.com 密钥位置：C:\Users\whj\Desktop\key\ec2-rag
 
