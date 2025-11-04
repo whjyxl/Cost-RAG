@@ -35,7 +35,7 @@ export interface PaginatedResponse<T> {
 
 // 认证相关类型
 export interface LoginRequest {
-  username: string
+  email: string
   password: string
   remember_me?: boolean
 }
@@ -1387,5 +1387,54 @@ export interface QueryEntity {
   type: string
   confidence: number
   source: string
-  metadata?: Record<string, any>
+}
+
+// 补充缺失的类型定义
+export interface DocumentHighlight {
+  id: string
+  text: string
+  score: number
+  documentId: string
+}
+
+export interface DocumentFacet {
+  field: string
+  values: Array<{
+    value: string
+    count: number
+  }>
+}
+
+export interface GraphNode {
+  id: string
+  label: string
+  type: string
+  properties: Record<string, any>
+}
+
+export interface GraphEdge {
+  id: string
+  source: string
+  target: string
+  label: string
+  properties: Record<string, any>
+}
+
+export interface GraphPath {
+  nodes: string[]
+  edges: string[]
+  score: number
+}
+
+export interface HistoricalStatistics {
+  totalProjects: number
+  averageCost: number
+  costRange: {
+    min: number
+    max: number
+  }
+  trends: Array<{
+    period: string
+    value: number
+  }>
 }

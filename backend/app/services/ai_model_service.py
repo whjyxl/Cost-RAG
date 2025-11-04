@@ -10,8 +10,12 @@ from enum import Enum
 import hashlib
 import logging
 
+import redis.asyncio as redis
 from app.core.config import settings
 from app.core.logging import logger
+from app.db.session import get_async_session
+from app.models.system_setting import SystemSetting
+from app.crud import system_setting as crud_system_setting
 
 
 class AIProvider(str, Enum):
@@ -41,6 +45,8 @@ class AIModelService:
     def __init__(self):
         self.session = None
         self.timeout = aiohttp.ClientTimeout(total=60, connect=10)
+        self.redis_client = None
+        self.config_cache_key = "ai_model_config"
         self.providers = {
             AIProvider.ZHIPUAI: {
                 "base_url": "https://open.bigmodel.cn/api/paas/v4",
@@ -140,6 +146,98 @@ class AIModelService:
             await self.session.close()
             self.session = None
 
+    async def _get_redis_client(self):
+        """获取Redis客户端"""
+        if self.redis_client is None:
+            try:
+                self.redis_client = redis.from_url(settings.REDIS_URL, decode_responses=True)
+            except Exception as e:
+                logger.error(f"Redis连接失败: {str(e)}")
+                self.redis_client = None
+        return self.redis_client
+
+    async def _close_redis_client(self):
+        """关闭Redis连接"""
+        if self.redis_client:
+            await self.redis_client.close()
+            self.redis_client = None
+
+    async def _get_provider_api_config(self, provider: AIProvider) -> Dict[str, Any]:
+        """
+        从数据库动态获取提供商API配置
+
+        Args:
+            provider: AI提供商
+
+        Returns:
+            API配置字典
+        """
+        try:
+            # 从Redis缓存获取配置
+            redis_client = await self._get_redis_client()
+            cache_key = f"ai_config_{provider.value}"
+
+            if redis_client:
+                try:
+                    cached_config = await redis_client.get(cache_key)
+                    if cached_config:
+                        return json.loads(cached_config)
+                except Exception as e:
+                    logger.warning(f"从Redis读取{provider.value}配置失败: {str(e)}")
+
+            # 从数据库获取配置
+            async with get_async_session() as db:
+                provider_key = provider.value
+
+                # 获取API密钥
+                api_key_setting = await crud_system_setting.get_by_key(db, f"{provider_key}_api_key")
+                api_key = api_key_setting.value if api_key_setting else None
+
+                # 获取启用状态
+                enabled_setting = await crud_system_setting.get_by_key(db, f"{provider_key}_enabled")
+                enabled = enabled_setting.value if enabled_setting else True
+
+                # 特殊配置处理
+                special_config = {}
+                if provider == AIProvider.BAIDU:
+                    # 百度需要额外的secret_key
+                    secret_key_setting = await crud_system_setting.get_by_key(db, f"{provider_key}_secret_key")
+                    if secret_key_setting:
+                        special_config['secret_key'] = secret_key_setting.value
+
+                elif provider == AIProvider.SPARK:
+                    # 讯飞需要app_id和api_secret
+                    app_id_setting = await crud_system_setting.get_by_key(db, f"{provider_key}_app_id")
+                    api_secret_setting = await crud_system_setting.get_by_key(db, f"{provider_key}_api_secret")
+                    if app_id_setting:
+                        special_config['app_id'] = app_id_setting.value
+                    if api_secret_setting:
+                        special_config['api_secret'] = api_secret_setting.value
+
+                config = {
+                    'api_key': api_key,
+                    'enabled': enabled,
+                    **special_config
+                }
+
+                # 保存到Redis缓存
+                if redis_client and api_key:
+                    try:
+                        await redis_client.set(
+                            cache_key,
+                            json.dumps(config, ensure_ascii=False),
+                            ex=300  # 5分钟缓存
+                        )
+                    except Exception as e:
+                        logger.warning(f"保存{provider.value}配置到Redis失败: {str(e)}")
+
+                logger.info(f"从数据库获取{provider.value}配置: {'已配置' if api_key else '未配置'}")
+                return config
+
+        except Exception as e:
+            logger.error(f"获取{provider.value}API配置失败: {str(e)}")
+            return {'api_key': None, 'enabled': False}
+
     async def chat_completion(
         self,
         provider: AIProvider,
@@ -167,6 +265,13 @@ class AIModelService:
         """
         try:
             session = await self._get_session()
+
+            # 动态获取API配置
+            api_config = await self._get_provider_api_config(provider)
+            if not api_config or not api_config.get('api_key'):
+                raise ValueError(f"提供商 {provider.value} 未配置API密钥")
+
+            # 获取模型配置
             provider_config = self.providers[provider]
 
             # 选择模型
@@ -238,7 +343,7 @@ class AIModelService:
             elif provider == AIProvider.SPARK:
                 request_data = {
                     "header": {
-                        "app_id": settings.SPARK_APP_ID,
+                        "app_id": api_config.get('app_id'),
                         "uid": "user_123"
                     },
                     "parameter": {
@@ -253,14 +358,33 @@ class AIModelService:
             else:
                 raise ValueError(f"不支持的提供商: {provider}")
 
-            # 发送请求
-            headers = provider_config["headers"].copy()
+            # 发送请求 - 使用动态获取的API配置
             if provider == AIProvider.BAIDU:
                 # 百度需要特殊的认证方式
-                auth_string = f"{provider_config['api_key']}:{provider_config['secret_key']}"
+                auth_string = f"{api_config.get('api_key')}:{api_config.get('secret_key')}"
                 auth_bytes = auth_string.encode('ascii')
                 auth_b64 = hashlib.sha1(auth_bytes).hexdigest()
-                headers['Authorization'] = auth_b64
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": auth_b64
+                }
+            elif provider == AIProvider.SPARK:
+                # 讯飞星火使用认证信息
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"{api_config.get('app_id')}:{api_config.get('api_secret')}"
+                }
+            else:
+                # 其他提供商使用标准Bearer Token
+                api_key = api_config.get('api_key')
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {api_key}"
+                }
+                # 调试日志：显示API密钥（脱敏）
+                if provider == AIProvider.MOONSHOT:
+                    masked_key = api_key[:8] + "***" if api_key and len(api_key) > 8 else "INVALID"
+                    logger.info(f"月之暗面API调用 - 密钥: {masked_key}, URL: {provider_config['base_url']}/chat/completions")
 
             async with session.post(
                 f"{provider_config['base_url']}/chat/completions",
@@ -582,7 +706,7 @@ class AIModelService:
                 },
                 AIProvider.DEEPSEEK: {
                     "deepseek-chat": {"input": 0.014, "output": 0.028},
-                    "deepseek-coder": {"input": 0.014, "0.028"}
+                    "deepseek-coder": {"input": 0.014, "output": 0.028}
                 },
                 AIProvider.YI: {
                     "yi-large": {"input": 0.025, "output": 0.025},
@@ -591,7 +715,7 @@ class AIModelService:
                 AIProvider.SPARK: {
                     "spark-3.5": {"input": 0.00021, "output": 0.00021},
                     "spark-2.0": {"input": 0.000168, "output": 0.000168},
-                    "spark-lite": {"input": 00021, "output": 00021}
+                    "spark-lite": {"input": 0.00021, "output": 0.00021}
                 }
             }
 
@@ -635,9 +759,350 @@ class AIModelService:
         """异步上下文管理器入口"""
         return self
 
+    async def get_model_config(self) -> Dict[str, Any]:
+        """
+        获取当前AI模型配置
+
+        Returns:
+            AI模型配置字典
+        """
+        try:
+            redis_client = await self._get_redis_client()
+
+            # 尝试从Redis获取配置
+            if redis_client:
+                try:
+                    cached_config = await redis_client.get(self.config_cache_key)
+                    if cached_config:
+                        config_data = json.loads(cached_config)
+                        return {
+                            "status": "success",
+                            "config": config_data,
+                            "source": "redis",
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                except Exception as e:
+                    logger.warning(f"从Redis读取配置失败: {str(e)}")
+
+            # 从数据库获取配置
+            try:
+                async with get_async_session() as db:
+                    system_settings = await SystemSetting.get_all(db)
+                    db_config = {}
+
+                    # 处理API密钥配置
+                    api_keys = {}
+                    for setting in system_settings:
+                        if setting.key.endswith('_api_key'):
+                            provider_name = setting.key.replace('_api_key', '')
+                            if provider_name in ['zhipuai', 'moonshot', 'dashscope', 'baidu', 'deepseek', 'yi', 'spark']:
+                                api_keys[provider_name] = setting.value
+
+                    # 构建配置字典
+                    for provider_name, provider_id in [
+                        ('zhipuai', AIProvider.ZHIPUAI),
+                        ('moonshot', AIProvider.MOONSHOT),
+                        ('dashscope', AIProvider.DASHSCOPE),
+                        ('baidu', AIProvider.BAIDU),
+                        ('deepseek', AIProvider.DEEPSEEK),
+                        ('yi', AIProvider.YI),
+                        ('spark', AIProvider.SPARK)
+                    ]:
+                        api_key = api_keys.get(provider_name)
+
+                        if provider_id == AIProvider.ZHIPUAI:
+                            db_config['zhipuai'] = {
+                                "api_key": api_key,
+                                "enabled": bool(api_key),
+                                "default_model": "glm-4",
+                                "available_models": ["glm-4", "glm-4-0520", "glm-3-turbo"]
+                            }
+                        elif provider_id == AIProvider.MOONSHOT:
+                            db_config['moonshot'] = {
+                                "api_key": api_key,
+                                "enabled": bool(api_key),
+                                "default_model": "moonshot-v1-8k",
+                                "available_models": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]
+                            }
+                        elif provider_id == AIProvider.DASHSCOPE:
+                            db_config['dashscope'] = {
+                                "api_key": api_key,
+                                "enabled": bool(api_key),
+                                "default_model": "qwen-turbo",
+                                "available_models": ["qwen-turbo", "qwen-plus", "qwen-max"]
+                            }
+                        elif provider_id == AIProvider.BAIDU:
+                            db_config['baidu'] = {
+                                "api_key": api_key,
+                                "enabled": bool(api_key),
+                                "default_model": "ERNIE-Speed-8K",
+                                "available_models": ["ERNIE-Speed-8K", "ERNIE-Lite-8K", "ERNIE-4.0"]
+                            }
+                        elif provider_id == AIProvider.DEEPSEEK:
+                            db_config['deepseek'] = {
+                                "api_key": api_key,
+                                "enabled": bool(api_key),
+                                "default_model": "deepseek-chat",
+                                "available_models": ["deepseek-chat", "deepseek-coder"]
+                            }
+                        elif provider_id == AIProvider.YI:
+                            db_config['yi'] = {
+                                "api_key": api_key,
+                                "enabled": bool(api_key),
+                                "default_model": "yi-34b-chat-0205",
+                                "available_models": ["yi-34b-chat-0205", "yi-34b-chat-200k"]
+                            }
+                        elif provider_id == AIProvider.SPARK:
+                            db_config['spark'] = {
+                                "app_id": None,  # 需要从配置中获取
+                                "api_secret": None,  # 需要从配置中获取
+                                "enabled": False,
+                                "default_model": "spark-3.5",
+                                "available_models": ["spark-3.5", "spark-2.0", "spark-lite"]
+                            }
+
+                    logger.info(f"从数据库读取到AI配置，包含 {len(db_config)} 个提供商")
+
+                    return {
+                        "status": "success",
+                        "config": db_config,
+                        "source": "database",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+
+            except Exception as e:
+                logger.error(f"从数据库读取配置失败: {str(e)}")
+
+            # 从环境变量获取默认配置作为后备
+            config = {
+                "zhipuai": {
+                    "api_key": settings.ZHIPUAI_API_KEY,
+                    "enabled": bool(settings.ZHIPUAI_API_KEY),
+                    "default_model": "glm-4",
+                    "available_models": ["glm-4", "glm-4-0520", "glm-3-turbo"]
+                },
+                "moonshot": {
+                    "api_key": settings.MOONSHOT_API_KEY,
+                    "enabled": bool(settings.MOONSHOT_API_KEY),
+                    "default_model": "moonshot-v1-8k",
+                    "available_models": ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]
+                },
+                "dashscope": {
+                    "api_key": settings.DASHSCOPE_API_KEY,
+                    "enabled": bool(settings.DASHSCOPE_API_KEY),
+                    "default_model": "qwen-turbo",
+                    "available_models": ["qwen-turbo", "qwen-plus", "qwen-max"]
+                },
+                "baidu": {
+                    "api_key": settings.BAIDU_API_KEY,
+                    "secret_key": settings.BAIDU_SECRET_KEY,
+                    "enabled": bool(settings.BAIDU_API_KEY and settings.BAIDU_SECRET_KEY),
+                    "default_model": "ERNIE-Speed-8K",
+                    "available_models": ["ERNIE-Speed-8K", "ERNIE-Lite-8K", "ERNIE-Turbo-8K"]
+                },
+                "deepseek": {
+                    "api_key": settings.DEEPSEEK_API_KEY,
+                    "enabled": bool(settings.DEEPSEEK_API_KEY),
+                    "default_model": "deepseek-chat",
+                    "available_models": ["deepseek-chat", "deepseek-coder"]
+                },
+                "yi": {
+                    "api_key": settings.YI_API_KEY,
+                    "enabled": bool(settings.YI_API_KEY),
+                    "default_model": "yi-large",
+                    "available_models": ["yi-large", "yi-medium", "yi-chat"]
+                },
+                "spark": {
+                    "app_id": settings.SPARK_APP_ID,
+                    "api_secret": settings.SPARK_API_SECRET,
+                    "enabled": bool(settings.SPARK_APP_ID and settings.SPARK_API_SECRET),
+                    "default_model": "spark-3.5",
+                    "available_models": ["spark-3.5", "spark-2.0", "spark-lite"]
+                }
+            }
+
+            return {
+                "status": "success",
+                "config": config,
+                "source": "environment",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+        except Exception as e:
+            logger.error(f"获取AI模型配置失败: {str(e)}")
+            return {
+                "status": "error",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+    async def update_model_config(self, config_update: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        更新AI模型配置
+
+        Args:
+            config_update: 配置更新数据
+
+        Returns:
+            更新结果
+        """
+        try:
+            redis_client = await self._get_redis_client()
+            updated_fields = []
+
+            # 获取当前配置
+            current_config_result = await self.get_model_config()
+            current_config = current_config_result.get("config", {})
+
+            # 更新配置
+            for provider, config in config_update.items():
+                if provider in current_config:
+                    # 更新指定提供商的配置
+                    for key, value in config.items():
+                        if value is not None:  # 更新非空值，允许空字符串清空配置
+                            current_config[provider][key] = value
+                            updated_fields.append(f"{provider}.{key}")
+
+            # 保存到Redis并清除相关缓存
+            if redis_client and updated_fields:
+                try:
+                    # 清除所有相关的提供商缓存
+                    await self._clear_provider_cache(config_update.keys(), redis_client)
+
+                    # 保存到Redis主缓存
+                    await redis_client.set(
+                        self.config_cache_key,
+                        json.dumps(current_config, ensure_ascii=False),
+                        ex=settings.REDIS_CACHE_TTL
+                    )
+                    logger.info(f"AI模型配置已保存到Redis: {', '.join(updated_fields)}")
+
+                    # 更新运行时配置（支持所有提供商）
+                    await self._update_runtime_config(current_config, updated_fields)
+
+                    return {
+                        "status": "success",
+                        "message": "配置更新成功",
+                        "updated_fields": updated_fields,
+                        "storage": "redis",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+
+                except Exception as e:
+                    logger.error(f"保存配置到Redis失败: {str(e)}")
+                    return {
+                        "status": "error",
+                        "message": "配置保存失败",
+                        "error": str(e),
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            else:
+                return {
+                    "status": "warning",
+                    "message": "没有需要更新的配置",
+                    "updated_fields": [],
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+
+        except Exception as e:
+            logger.error(f"更新AI模型配置失败: {str(e)}")
+            return {
+                "status": "error",
+                "message": "配置更新失败",
+                "error": str(e),
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+    async def _clear_provider_cache(self, providers: List[str], redis_client):
+        """
+        清除指定提供商的缓存
+
+        Args:
+            providers: 提供商列表
+            redis_client: Redis客户端
+        """
+        try:
+            # 清除各提供商的单独缓存
+            for provider in providers:
+                cache_key = f"ai_config_{provider}"
+                await redis_client.delete(cache_key)
+                logger.info(f"已清除{provider}提供商的缓存")
+
+            # 同时清除主配置缓存，确保下次读取时从数据库获取最新数据
+            await redis_client.delete(self.config_cache_key)
+            logger.info("已清除主配置缓存")
+
+        except Exception as e:
+            logger.warning(f"清除缓存时出现错误: {str(e)}")
+
+    async def _update_runtime_config(self, current_config: Dict[str, Any], updated_fields: List[str]):
+        """
+        更新运行时配置
+
+        Args:
+            current_config: 当前配置
+            updated_fields: 已更新的字段列表
+        """
+        try:
+            # 更新智谱AI配置
+            if any("zhipuai.api_key" in field for field in updated_fields):
+                new_api_key = current_config.get("zhipuai", {}).get("api_key")
+                if new_api_key and AIProvider.ZHIPUAI in self.providers:
+                    self.providers[AIProvider.ZHIPUAI]["headers"]["Authorization"] = f"Bearer {new_api_key}"
+                    logger.info("智谱AI配置已更新到运行时")
+
+            # 更新月之暗面配置
+            if any("moonshot.api_key" in field for field in updated_fields):
+                new_api_key = current_config.get("moonshot", {}).get("api_key")
+                if new_api_key and AIProvider.MOONSHOT in self.providers:
+                    self.providers[AIProvider.MOONSHOT]["headers"]["Authorization"] = f"Bearer {new_api_key}"
+                    logger.info("月之暗面配置已更新到运行时")
+
+            # 更新阿里通义千问配置
+            if any("dashscope.api_key" in field for field in updated_fields):
+                new_api_key = current_config.get("dashscope", {}).get("api_key")
+                if new_api_key and AIProvider.DASHSCOPE in self.providers:
+                    self.providers[AIProvider.DASHSCOPE]["headers"]["Authorization"] = f"Bearer {new_api_key}"
+                    logger.info("阿里通义千问配置已更新到运行时")
+
+            # 更新百度文心配置
+            if any("baidu.api_key" in field for field in updated_fields):
+                new_api_key = current_config.get("baidu", {}).get("api_key")
+                new_secret_key = current_config.get("baidu", {}).get("secret_key")
+                if new_api_key and new_secret_key and AIProvider.BAIDU in self.providers:
+                    self.providers[AIProvider.BAIDU]["api_key"] = new_api_key
+                    self.providers[AIProvider.BAIDU]["secret_key"] = new_secret_key
+                    logger.info("百度文心配置已更新到运行时")
+
+            # 更新深度求索配置
+            if any("deepseek.api_key" in field for field in updated_fields):
+                new_api_key = current_config.get("deepseek", {}).get("api_key")
+                if new_api_key and AIProvider.DEEPSEEK in self.providers:
+                    self.providers[AIProvider.DEEPSEEK]["headers"]["Authorization"] = f"Bearer {new_api_key}"
+                    logger.info("深度求索配置已更新到运行时")
+
+            # 更新零一万物配置
+            if any("yi.api_key" in field for field in updated_fields):
+                new_api_key = current_config.get("yi", {}).get("api_key")
+                if new_api_key and AIProvider.YI in self.providers:
+                    self.providers[AIProvider.YI]["headers"]["Authorization"] = f"Bearer {new_api_key}"
+                    logger.info("零一万物配置已更新到运行时")
+
+            # 更新科大讯飞星火配置
+            if any("spark" in field for field in updated_fields):
+                new_app_id = current_config.get("spark", {}).get("app_id")
+                new_api_secret = current_config.get("spark", {}).get("api_secret")
+                if new_app_id and new_api_secret and AIProvider.SPARK in self.providers:
+                    self.providers[AIProvider.SPARK]["headers"]["Authorization"] = f"{new_app_id}:{new_api_secret}"
+                    logger.info("科大讯飞星火配置已更新到运行时")
+
+        except Exception as e:
+            logger.error(f"更新运行时配置失败: {str(e)}")
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """异步上下文管理器出口"""
         await self._close_session()
+        await self._close_redis_client()
 
 
 # 全局AI模型服务实例

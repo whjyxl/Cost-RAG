@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Card,
   Typography,
@@ -52,6 +52,9 @@ import {
   EmbeddingApiConfig,
   DEFAULT_EMBEDDING_CONFIG
 } from '../../config/models'
+
+// 导入API服务
+import { request } from '../../utils/request'
 
 // 导入Embedding模型选择器
 import EmbeddingModelSelector from '../../components/EmbeddingModelSelector'
@@ -111,7 +114,6 @@ interface SystemConfig {
   chineseLLMApiKey: string
   chineseLLMMaxTokens: number
   chineseLLMTemperature: number
-  enableChineseLLM: boolean
 
   // 国产模型高级配置
   chineseModelConfig: ChineseModelConfig
@@ -189,7 +191,6 @@ const SystemConfigPage: React.FC = () => {
     chineseLLMApiKey: 'your-api-key-here',
     chineseLLMMaxTokens: 4000,
     chineseLLMTemperature: 0.7,
-    enableChineseLLM: false,
 
     // 国产模型高级配置
     chineseModelConfig: {
@@ -254,31 +255,302 @@ const SystemConfigPage: React.FC = () => {
     },
   ]
 
+  // 加载AI模型配置
+  const loadAIModelConfig = async () => {
+    try {
+      console.log('开始加载AI模型配置...')
+
+      // 使用正确的API路径（保持v1前缀）
+      const response = await request('/api/v1/ai-models/', {
+        method: 'GET',
+      })
+
+      console.log('AI配置API响应:', response)
+
+      // 适配后端返回的数据格式
+      if (response && response.success && response.data) {
+        const configs = response.data
+        console.log('配置数据:', configs)
+
+        // 统一表单字段映射，使用下划线命名
+        const formValues = {}
+
+        // 设置智谱AI配置
+        if (configs.zhipuai && configs.zhipuai.api_key) {
+          formValues['zhipuai_api_key'] = configs.zhipuai.api_key
+        }
+
+        // 设置月之暗面配置
+        if (configs.moonshot && configs.moonshot.api_key) {
+          formValues['moonshot_api_key'] = configs.moonshot.api_key
+        }
+
+        // 设置阿里千问配置（注意后端字段是qwen，前端显示是dashscope）
+        if (configs.qwen && configs.qwen.api_key) {
+          formValues['dashscope_api_key'] = configs.qwen.api_key
+        }
+
+        // 设置百度文心一言配置
+        if (configs.baidu && configs.baidu.api_key) {
+          formValues['baidu_api_key'] = configs.baidu.api_key
+        }
+
+        // 设置深度求索配置
+        if (configs.deepseek && configs.deepseek.api_key) {
+          formValues['deepseek_api_key'] = configs.deepseek.api_key
+        }
+
+        // 设置零一万物配置
+        if (configs.yi && configs.yi.api_key) {
+          formValues['yi_api_key'] = configs.yi.api_key
+        }
+
+        // 设置科大讯飞星火配置
+        if (configs.spark && configs.spark.api_key) {
+          formValues['spark_api_key'] = configs.spark.api_key
+        }
+
+        // 一次性设置所有表单字段
+        if (Object.keys(formValues).length > 0) {
+          console.log('设置表单字段:', formValues)
+          form.setFieldsValue(formValues)
+
+          // 同时更新config状态
+          setConfig(prev => ({
+            ...prev,
+            chineseModelConfig: {
+              ...prev.chineseModelConfig,
+              ...formValues
+            }
+          }))
+        }
+      }
+    } catch (error) {
+      console.error('加载AI配置失败:', error)
+    }
+  }
+
+  // 组件挂载时加载配置
+  useEffect(() => {
+    loadAIModelConfig()
+  }, [])
+
   // 保存配置
   const handleSaveConfig = async (values: any) => {
     setLoading(true)
     try {
-      // 模拟保存
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      setConfig(prev => ({ ...prev, ...values }))
-      message.success('系统配置已保存')
-    } catch (error) {
-      message.error('保存失败，请重试')
+      console.log('开始保存配置:', values)
+      let successCount = 0
+      let failCount = 0
+
+      // 统一字段映射，支持下划线格式
+      const apiConfigs = {
+        'zhipuai_api_key': values.zhipuai_api_key,
+        'moonshot_api_key': values.moonshot_api_key,
+        'dashscope_api_key': values.dashscope_api_key,
+        'baidu_api_key': values.baidu_api_key,
+        'deepseek_api_key': values.deepseek_api_key,
+        'yi_api_key': values.yi_api_key,
+        'spark_api_key': values.spark_api_key
+      }
+
+      console.log('处理后的API配置:', apiConfigs)
+
+      // 保存智谱AI配置
+      if (apiConfigs.zhipuai_api_key) {
+        try {
+          console.log('保存智谱AI配置...')
+          const response = await request('/api/v1/ai-models/zhipuai', {
+            method: 'PUT',
+            data: {
+              provider: 'zhipuai',
+              api_key: apiConfigs.zhipuai_api_key,
+              enabled: true,
+            },
+          });
+          console.log('智谱AI配置保存成功:', response)
+          successCount++;
+          message.success('智谱AI配置已保存');
+        } catch (error) {
+          failCount++;
+          console.error('保存智谱AI配置失败:', error);
+          const errorMsg = error?.response?.data?.detail || '保存智谱AI配置失败';
+          message.error(`保存智谱AI配置失败: ${errorMsg}`);
+        }
+      }
+
+      // 保存月之暗面配置
+      if (apiConfigs.moonshot_api_key) {
+        try {
+          console.log('保存月之暗面配置...')
+          const response = await request('/api/v1/ai-models/moonshot', {
+            method: 'PUT',
+            data: {
+              provider: 'moonshot',
+              api_key: apiConfigs.moonshot_api_key,
+              enabled: true,
+            },
+          });
+          console.log('月之暗面配置保存成功:', response)
+          successCount++;
+          message.success('月之暗面配置已保存');
+        } catch (error) {
+          failCount++;
+          console.error('保存月之暗面配置失败:', error);
+          const errorMsg = error?.response?.data?.detail || '保存月之暗面配置失败';
+          message.error(`保存月之暗面配置失败: ${errorMsg}`);
+        }
+      }
+
+      // 保存阿里千问配置
+      if (apiConfigs.dashscope_api_key) {
+        try {
+          console.log('保存阿里千问配置...')
+          const response = await request('/api/v1/ai-models/dashscope', {
+            method: 'PUT',
+            data: {
+              provider: 'dashscope',
+              api_key: apiConfigs.dashscope_api_key,
+              enabled: true,
+            },
+          });
+          console.log('阿里千问配置保存成功:', response)
+          successCount++;
+          message.success('阿里千问配置已保存');
+        } catch (error) {
+          failCount++;
+          console.error('保存阿里千问配置失败:', error);
+          const errorMsg = error?.response?.data?.detail || '保存阿里千问配置失败';
+          message.error(`保存阿里千问配置失败: ${errorMsg}`);
+        }
+      }
+
+      // 保存百度文心一言配置
+      if (apiConfigs.baidu_api_key) {
+        try {
+          console.log('保存百度文心一言配置...')
+          const response = await request('/api/v1/ai-models/baidu', {
+            method: 'PUT',
+            data: {
+              provider: 'baidu',
+              api_key: apiConfigs.baidu_api_key,
+              enabled: true,
+            },
+          });
+          console.log('百度文心一言配置保存成功:', response)
+          successCount++;
+          message.success('百度文心一言配置已保存');
+        } catch (error) {
+          failCount++;
+          console.error('保存百度文心一言配置失败:', error);
+          const errorMsg = error?.response?.data?.detail || '保存百度文心一言配置失败';
+          message.error(`保存百度文心一言配置失败: ${errorMsg}`);
+        }
+      }
+
+      // 保存深度求索配置
+      if (apiConfigs.deepseek_api_key) {
+        try {
+          console.log('保存深度求索配置...')
+          const response = await request('/api/v1/ai-models/deepseek', {
+            method: 'PUT',
+            data: {
+              provider: 'deepseek',
+              api_key: apiConfigs.deepseek_api_key,
+              enabled: true,
+            },
+          });
+          console.log('深度求索配置保存成功:', response)
+          successCount++;
+          message.success('深度求索配置已保存');
+        } catch (error) {
+          failCount++;
+          console.error('保存深度求索配置失败:', error);
+          const errorMsg = error?.response?.data?.detail || '保存深度求索配置失败';
+          message.error(`保存深度求索配置失败: ${errorMsg}`);
+        }
+      }
+
+      // 保存零一万物配置
+      if (apiConfigs.yi_api_key) {
+        try {
+          console.log('保存零一万物配置...')
+          const response = await request('/api/v1/ai-models/yi', {
+            method: 'PUT',
+            data: {
+              provider: 'yi',
+              api_key: apiConfigs.yi_api_key,
+              enabled: true,
+            },
+          });
+          console.log('零一万物配置保存成功:', response)
+          successCount++;
+          message.success('零一万物配置已保存');
+        } catch (error) {
+          failCount++;
+          console.error('保存零一万物配置失败:', error);
+          const errorMsg = error?.response?.data?.detail || '保存零一万物配置失败';
+          message.error(`保存零一万物配置失败: ${errorMsg}`);
+        }
+      }
+
+      // 保存科大讯飞星火配置
+      if (apiConfigs.spark_api_key) {
+        try {
+          console.log('保存科大讯飞星火配置...')
+          const response = await request('/api/v1/ai-models/spark', {
+            method: 'PUT',
+            data: {
+              provider: 'spark',
+              api_key: apiConfigs.spark_api_key,
+              enabled: true,
+            },
+          });
+          console.log('科大讯飞星火配置保存成功:', response)
+          successCount++;
+          message.success('科大讯飞星火配置已保存');
+        } catch (error) {
+          failCount++;
+          console.error('保存科大讯飞星火配置失败:', error);
+          const errorMsg = error?.response?.data?.detail || '保存科大讯飞星火配置失败';
+          message.error(`保存科大讯飞星火配置失败: ${errorMsg}`);
+        }
+      }
+
+      // 显示总体保存结果
+      if (successCount > 0) {
+        console.log(`配置保存完成: ${successCount}个成功, ${failCount}个失败`)
+        message.success(`AI模型配置保存完成: ${successCount}个成功, ${failCount}个失败`);
+
+        // 保存成功后重新加载配置以确保UI显示最新数据
+        console.log('重新加载配置以更新UI...')
+        await loadAIModelConfig()
+      } else if (failCount === 0) {
+        message.info('没有需要保存的AI模型配置');
+      }
+
+      // 保存其他系统配置（这里可以扩展其他配置的保存逻辑）
+      setConfig(prev => ({ ...prev, ...values }));
+
+    } catch (error: any) {
+      console.error('保存配置失败:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || '保存失败，请重试';
+      message.error(`保存失败: ${errorMessage}`);
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   }
 
   // 测试连接
   const handleTestConnection = async (type: string) => {
-    setTestLoading(true)
+    setTestLoading(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      message.success(`${type}连接测试成功`)
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      message.success(`${type}连接测试成功`);
     } catch (error) {
-      message.error(`${type}连接测试失败`)
+      message.error(`${type}连接测试失败`);
     } finally {
-      setTestLoading(false)
+      setTestLoading(false);
     }
   }
 
@@ -641,16 +913,7 @@ const SystemConfigPage: React.FC = () => {
         />
 
         <Row gutter={24}>
-          <Col span={12}>
-            <Form.Item
-              label="启用国产模型"
-              name="enableChineseLLM"
-              valuePropName="checked"
-            >
-              <Switch />
-            </Form.Item>
-          </Col>
-          <Col span={12}>
+          <Col span={24}>
             <Form.Item
               label="模型提供商"
               name="chineseLLMProvider"
@@ -682,10 +945,92 @@ const SystemConfigPage: React.FC = () => {
           </Col>
           <Col span={12}>
             <Form.Item
-              label="API密钥"
+              label="通用API密钥"
               name="chineseLLMApiKey"
+              extra="所有国产模型的通用密钥（可选）"
             >
               <Input.Password placeholder="请输入API密钥" />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        {/* 具体模型的API密钥配置 */}
+        <Alert
+          message="API密钥配置"
+          description="请为每个AI模型提供商配置独立的API密钥"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+
+        <Row gutter={24}>
+          <Col span={8}>
+            <Form.Item
+              label="智谱AI密钥"
+              name="zhipuai_api_key"
+              extra="GLM-4, GLM-3-Turbo等"
+            >
+              <Input.Password placeholder="请输入智谱AI API密钥" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item
+              label="月之暗面密钥"
+              name="moonshot_api_key"
+              extra="Moonshot-v1-8k等"
+            >
+              <Input.Password placeholder="请输入月之暗面API密钥" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item
+              label="阿里千问密钥"
+              name="dashscope_api_key"
+              extra="Qwen-Turbo, Qwen-Plus等"
+            >
+              <Input.Password placeholder="请输入阿里千问API密钥" />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={24}>
+          <Col span={8}>
+            <Form.Item
+              label="百度文心密钥"
+              name="baidu_api_key"
+              extra="文心一言4.0等"
+            >
+              <Input.Password placeholder="请输入百度文心API密钥" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item
+              label="深度求索密钥"
+              name="deepseek_api_key"
+              extra="DeepSeek-V2等"
+            >
+              <Input.Password placeholder="请输入深度求索API密钥" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item
+              label="零一万物密钥"
+              name="yi_api_key"
+              extra="Yi-34B-Chat等"
+            >
+              <Input.Password placeholder="请输入零一万物API密钥" />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={24}>
+          <Col span={8}>
+            <Form.Item
+              label="科大讯飞星火密钥"
+              name="spark_api_key"
+              extra="讯飞星火3.5等"
+            >
+              <Input.Password placeholder="请输入科大讯飞星火API密钥" />
             </Form.Item>
           </Col>
         </Row>

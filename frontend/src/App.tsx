@@ -1,6 +1,4 @@
-import React from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { Layout } from 'antd'
 import { useAppSelector } from './hooks/redux'
 import { selectAuth } from './store/slices/authSlice'
 
@@ -16,13 +14,11 @@ import SettingsPage from './pages/settings/SettingsPage'
 import AppLayout from './components/layout/AppLayout'
 import LoadingScreen from './components/common/LoadingScreen'
 
-const { Content } = Layout
-
 function App() {
   const { isAuthenticated, isLoading } = useAppSelector(selectAuth)
 
   // 临时禁用认证检查用于测试
-  const bypassAuth = true
+  const bypassAuth = false
 
   // 显示加载屏幕
   if (isLoading && !bypassAuth) {

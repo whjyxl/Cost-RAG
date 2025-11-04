@@ -28,6 +28,8 @@ export const loginUser = createAsyncThunk(
   'auth/login',
   async (credentials: LoginRequest, { rejectWithValue }) => {
     try {
+      console.log('开始登录请求...', credentials.email)
+
       const response = await fetch('/api/v1/auth/login', {
         method: 'POST',
         headers: {
@@ -37,20 +39,25 @@ export const loginUser = createAsyncThunk(
       })
 
       const data = await response.json()
+      console.log('登录响应:', { status: response.status, hasToken: !!data.access_token })
 
       if (!response.ok) {
         throw new Error(data.message || '登录失败')
       }
 
-      // 保存到localStorage
-      if (credentials.remember_me) {
+      // 保存到localStorage - 修复：无论是否记住我都保存token，否则用户无法正常使用
+      if (data.access_token) {
         localStorage.setItem('accessToken', data.access_token)
-        localStorage.setItem('refreshToken', data.refresh_token)
-        localStorage.setItem('lastLoginTime', Date.now().toString())
+        console.log('Token已保存到localStorage')
       }
 
+      localStorage.setItem('refreshToken', data.refresh_token || '')
+      localStorage.setItem('lastLoginTime', Date.now().toString())
+
+      console.log('登录成功，用户信息:', data.user)
       return data
     } catch (error: any) {
+      console.error('登录失败:', error)
       return rejectWithValue(
         error.message || '登录失败，请重试'
       )
