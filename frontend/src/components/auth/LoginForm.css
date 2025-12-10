@@ -1,283 +1,262 @@
-/* 登录表单样式 */
-.login-form-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
-  padding: 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
+/* Login Form Component Styles - Minimal Version */
+/* This file contains only form element styling, not page layout */
 
-.login-form-card {
+.login-form-wrapper {
   width: 100%;
-  max-width: 420px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
-  border-radius: 16px;
-  overflow: hidden;
-  background: white;
+  max-width: 400px;
+  margin: 0 auto;
+  z-index: 100;
+  position: relative;
 }
 
+/* Form Header */
 .login-form-header {
+  margin-bottom: 32px;
   text-align: center;
-  margin-bottom: 24px;
+  animation: fadeInUp 0.6s ease-out 0.2s both;
 }
 
-.login-logo {
-  margin-bottom: 16px;
-}
-
-.logo-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
-  margin: 0 auto 16px;
-}
-
-.login-title {
-  margin-bottom: 8px !important;
-  font-weight: 700;
+.login-form-title {
+  font-size: 24px;
+  font-weight: 600;
   color: #1f2937;
+  margin-bottom: 8px !important;
+  letter-spacing: -0.5px;
 }
 
-.login-subtitle {
-  color: #6b7280;
+.login-form-subtitle {
   font-size: 14px;
+  color: #6b7280;
+  line-height: 1.5;
 }
 
+/* Form Container */
 .login-form {
-  margin-top: 24px;
+  animation: formFadeIn 0.8s ease-out 0.3s both;
 }
 
 .login-form .ant-form-item {
   margin-bottom: 20px;
 }
 
-.login-form .ant-input-affix-wrapper,
-.login-form .ant-input {
+/* Input Fields */
+.login-form .ant-input,
+.login-form .ant-input-password {
+  height: 48px;
   border-radius: 12px;
   border: 2px solid #e5e7eb;
+  background-color: #f8fafc;
+  font-size: 14px;
   transition: all 0.3s ease;
 }
 
-.login-form .ant-input-affix-wrapper:hover,
-.login-form .ant-input:hover {
+.login-form .ant-input::placeholder,
+.login-form .ant-input-password::placeholder {
+  color: #d1d5db;
+}
+
+.login-form .ant-input:hover,
+.login-form .ant-input-password:hover {
   border-color: #d1d5db;
+  background-color: #f5f9ff;
 }
 
-.login-form .ant-input-affix-wrapper-focused,
-.login-form .ant-input-affix-wrapper:focus-within,
-.login-form .ant-input:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+.login-form .ant-input:focus,
+.login-form .ant-input-password:focus,
+.login-form .ant-input-focused,
+.login-form .ant-input-password-focused {
+  border-color: #667eea;
+  background-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
+/* Input Icons */
 .login-form .ant-input-prefix {
   color: #9ca3af;
+  font-size: 16px;
 }
 
+.login-form .ant-input:focus ~ .ant-input-prefix,
+.login-form .ant-input-focused .ant-input-prefix {
+  color: #667eea;
+}
+
+/* Password Toggle Icon */
+.login-form .ant-input-password-icon {
+  color: #9ca3af;
+  cursor: pointer;
+  transition: color 0.3s ease;
+}
+
+.login-form .ant-input-password:hover .ant-input-password-icon {
+  color: #667eea;
+}
+
+/* Checkbox */
+.login-form .ant-checkbox-wrapper {
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.login-form .ant-checkbox-inner {
+  border-color: #d1d5db;
+  background-color: #f8fafc;
+}
+
+.login-form .ant-checkbox-inner::after {
+  border-color: #ffffff;
+}
+
+.login-form .ant-checkbox-checked .ant-checkbox-inner {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: #667eea;
+}
+
+/* Form Options (Remember me + Forgot password) */
 .login-options {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: 24px;
+  animation: fadeInUp 0.6s ease-out 0.4s both;
+}
+
+.login-options .ant-checkbox-wrapper {
+  flex: 1;
 }
 
 .forgot-password-link {
-  color: #3b82f6;
+  color: #667eea;
   font-size: 14px;
-  transition: color 0.2s ease;
+  text-decoration: none;
+  transition: color 0.3s ease;
 }
 
 .forgot-password-link:hover {
-  color: #2563eb;
+  color: #764ba2;
+  text-decoration: underline;
+}
+
+/* Submit Button */
+.login-form .ant-btn-primary {
+  height: 48px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.login-form .ant-btn-primary:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.login-form .ant-btn-primary:active {
+  transform: translateY(-1px);
+}
+
+.login-form .ant-btn-primary:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .login-button {
-  height: 48px;
+  animation: fadeInUp 0.6s ease-out 0.5s both;
+}
+
+/* Loading State */
+.login-form .ant-btn-loading-icon {
+  margin-right: 8px;
+}
+
+/* Error Alert */
+.login-form-error {
+  margin-bottom: 20px;
   border-radius: 12px;
-  font-weight: 600;
-  font-size: 16px;
-  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   border: none;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-  transition: all 0.3s ease;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.1);
+  animation: slideInDown 0.4s ease-out;
 }
 
-.login-button:hover {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+.login-form-error .ant-alert-message {
+  font-weight: 600;
+  color: #7f1d1d;
 }
 
-.login-button:active {
-  transform: translateY(0);
+.login-form-error .ant-alert-description {
+  color: #991b1b;
+  font-size: 13px;
 }
 
-.login-button.ant-btn-loading {
-  background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
-}
-
+/* Register Link Section */
 .register-link {
+  margin-top: 24px;
   text-align: center;
+  font-size: 14px;
+  color: #6b7280;
+  animation: fadeInUp 0.6s ease-out 0.6s both;
 }
 
 .register-text {
+  color: #667eea;
+  font-weight: 600;
   margin-left: 4px;
-  color: #3b82f6;
-  font-weight: 500;
+  transition: color 0.3s ease;
 }
 
 .register-text:hover {
-  color: #2563eb;
+  color: #764ba2;
 }
 
+/* Footer */
 .login-footer {
-  margin-top: 24px;
+  margin-top: 20px;
   text-align: center;
+  font-size: 12px;
+  color: #9ca3af;
+  animation: fadeInUp 0.6s ease-out 0.7s both;
 }
 
 .footer-text {
-  font-size: 12px;
-  color: #9ca3af;
+  line-height: 1.6;
 }
 
-.footer-text a {
-  color: #6b7280;
-  margin: 0 2px;
+.login-footer a {
+  color: #667eea;
+  text-decoration: none;
+  transition: color 0.3s ease;
+  margin: 0 4px;
 }
 
-.footer-text a:hover {
-  color: #3b82f6;
+.login-footer a:hover {
+  color: #764ba2;
+  text-decoration: underline;
 }
 
-.login-form-error {
-  margin-bottom: 20px;
-  border-radius: 8px;
+/* Form Validation Messages */
+.login-form .ant-form-item-has-error .ant-input,
+.login-form .ant-form-item-has-error .ant-input-password {
+  border-color: #ef4444;
 }
 
-/* 响应式设计 */
-@media (max-width: 480px) {
-  .login-form-container {
-    padding: 12px;
-  }
-
-  .login-form-card {
-    margin: 0;
-    border-radius: 12px;
-  }
-
-  .login-form-header {
-    margin-bottom: 20px;
-  }
-
-  .logo-icon {
-    width: 56px;
-    height: 56px;
-  }
-
-  .login-title {
-    font-size: 24px !important;
-  }
-
-  .login-form .ant-form-item {
-    margin-bottom: 16px;
-  }
-
-  .login-button {
-    height: 44px;
-    font-size: 15px;
-  }
-
-  .login-options {
-    flex-direction: column;
-    gap: 12px;
-    align-items: flex-start;
-  }
-
-  .forgot-password-link {
-    align-self: flex-end;
-  }
+.login-form .ant-form-item-explain-error {
+  color: #dc2626;
+  font-size: 13px;
+  margin-top: 6px;
 }
 
-/* 暗黑模式 */
-.dark .login-form-container {
-  background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-}
-
-.dark .login-form-card {
-  background: #1f2937;
-  border: 1px solid #374151;
-}
-
-.dark .login-title {
-  color: #f3f4f6;
-}
-
-.dark .login-subtitle {
-  color: #9ca3af;
-}
-
-.dark .login-form .ant-input-affix-wrapper,
-.dark .login-form .ant-input {
-  background: #374151;
-  border-color: #4b5563;
-  color: #f3f4f6;
-}
-
-.dark .login-form .ant-input-affix-wrapper:hover,
-.dark .login-form .ant-input:hover {
-  border-color: #6b7280;
-}
-
-.dark .login-form .ant-input-affix-wrapper-focused,
-.dark .login-form .ant-input-affix-wrapper:focus-within,
-.dark .login-form .ant-input:focus {
-  border-color: #60a5fa;
-  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.1);
-}
-
-.dark .login-form .ant-input-prefix {
-  color: #9ca3af;
-}
-
-.dark .forgot-password-link {
-  color: #60a5fa;
-}
-
-.dark .forgot-password-link:hover {
-  color: #3b82f6;
-}
-
-.dark .register-text {
-  color: #60a5fa;
-}
-
-.dark .register-text:hover {
-  color: #3b82f6;
-}
-
-.dark .footer-text {
-  color: #6b7280;
-}
-
-.dark .footer-text a {
-  color: #9ca3af;
-}
-
-.dark .footer-text a:hover {
-  color: #60a5fa;
-}
-
-/* 动画效果 */
-@keyframes slideUp {
+/* Animations */
+@keyframes fadeInUp {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -285,29 +264,162 @@
   }
 }
 
-.login-form-card {
-  animation: slideUp 0.5s ease-out;
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-/* 表单验证状态样式 */
-.login-form .ant-form-item-has-error .ant-input-affix-wrapper,
-.login-form .ant-form-item-has-error .ant-input {
-  border-color: #ef4444;
+@keyframes formFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
-.login-form .ant-form-item-has-error .ant-input-affix-wrapper:focus,
-.login-form .ant-form-item-has-error .ant-input:focus {
-  border-color: #ef4444;
-  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.1);
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+  .login-form-title {
+    color: #f3f4f6;
+  }
+
+  .login-form-subtitle {
+    color: #d1d5db;
+  }
+
+  .login-form .ant-input,
+  .login-form .ant-input-password {
+    border-color: #374151;
+    background-color: #1f2937;
+    color: #f3f4f6;
+  }
+
+  .login-form .ant-input::placeholder,
+  .login-form .ant-input-password::placeholder {
+    color: #6b7280;
+  }
+
+  .login-form .ant-input:hover,
+  .login-form .ant-input-password:hover {
+    border-color: #4b5563;
+    background-color: #111827;
+  }
+
+  .login-form .ant-input:focus,
+  .login-form .ant-input-password:focus,
+  .login-form .ant-input-focused,
+  .login-form .ant-input-password-focused {
+    border-color: #667eea;
+    background-color: #1f2937;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+  }
+
+  .login-options {
+    color: #9ca3af;
+  }
+
+  .login-form .ant-checkbox-wrapper {
+    color: #d1d5db;
+  }
+
+  .forgot-password-link {
+    color: #8b9dc3;
+  }
+
+  .forgot-password-link:hover {
+    color: #a8bfe8;
+  }
+
+  .register-link {
+    color: #9ca3af;
+  }
+
+  .register-text {
+    color: #8b9dc3;
+  }
+
+  .register-text:hover {
+    color: #a8bfe8;
+  }
+
+  .login-footer {
+    color: #6b7280;
+  }
+
+  .login-footer a {
+    color: #8b9dc3;
+  }
+
+  .login-footer a:hover {
+    color: #a8bfe8;
+  }
 }
 
-/* 加载状态样式 */
-.login-form .ant-btn-loading .anticon {
-  color: white;
+/* Responsive Design */
+@media (max-width: 768px) {
+  .login-form-wrapper {
+    max-width: 100%;
+    padding: 0 20px;
+  }
+
+  .login-form-title {
+    font-size: 20px;
+  }
+
+  .login-form-subtitle {
+    font-size: 13px;
+  }
+
+  .login-form .ant-input,
+  .login-form .ant-input-password {
+    height: 44px;
+    font-size: 13px;
+  }
+
+  .login-form .ant-btn-primary {
+    height: 44px;
+    font-size: 14px;
+  }
 }
 
-/* 成功状态样式 */
-.login-form .ant-form-item-has-success .ant-input-affix-wrapper,
-.login-form .ant-form-item-has-success .ant-input {
-  border-color: #10b981;
+@media (max-width: 480px) {
+  .login-form-wrapper {
+    max-width: 100%;
+    padding: 0 16px;
+  }
+
+  .login-form-title {
+    font-size: 18px;
+  }
+
+  .login-form-subtitle {
+    font-size: 12px;
+  }
+
+  .login-options {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .forgot-password-link {
+    align-self: flex-end;
+  }
+}
+
+/* Prevent form elements from interfering with page layout */
+.login-form-wrapper * {
+  box-sizing: border-box;
+}
+
+/* Ensure form doesn't overflow */
+.login-form-wrapper {
+  overflow: hidden;
 }

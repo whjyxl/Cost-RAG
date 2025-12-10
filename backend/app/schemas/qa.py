@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional, Union
 from enum import Enum
 from pydantic import BaseModel, Field, validator
+from app.schemas.ai_model import ChatMessage, ChatRequest
+from app.services.ai_model_service import AIProvider
 
 
 class QueryType(str, Enum):
@@ -60,6 +62,7 @@ class QueryRequest(BaseModel):
     project_id: Optional[int] = Field(None, description="项目ID")
     filters: Dict[str, Any] = Field(default_factory=dict, description="查询过滤器")
     max_results: int = Field(10, ge=1, le=50, description="最大结果数")
+    similarity_threshold: float = Field(0.5, ge=0.0, le=1.0, description="相似度阈值")
     include_sources: List[DataSource] = Field(
         default=[DataSource.DOCUMENTS, DataSource.KNOWLEDGE_GRAPH, DataSource.COST_DATABASE],
         description="包含的数据源"
@@ -92,16 +95,23 @@ class RetrievedKnowledge(BaseModel):
 
 
 class RetrievedCostData(BaseModel):
-    """检索到的成本数据"""
-    cost_id: Optional[int]
-    item_name: str
-    category: str
-    unit: str
-    price_range: Dict[str, float]
-    region: Optional[str]
-    time_period: str
-    relevance_score: float
-    source: str
+    """检索到的成本数据（项目成本数据）"""
+    id: Optional[int] = Field(None, description="项目ID")
+    project_id: Optional[int] = Field(None, description="项目ID")
+    project_name: str = Field(..., description="项目名称")
+    project_type: Optional[str] = Field(None, description="项目类型")
+    location: Optional[str] = Field(None, description="项目位置")
+    building_area: Optional[float] = Field(None, description="建筑面积(㎡)")
+    unit_price: Optional[float] = Field(None, description="单位造价(元/㎡)")
+    total_cost: Optional[float] = Field(None, description="总造价")
+    floors: Optional[Union[int, str]] = Field(None, description="楼层数(可以是数字或文本描述)")
+    structure_type: Optional[str] = Field(None, description="结构类型")
+    completion_date: Optional[str] = Field(None, description="竣工日期")
+    status: Optional[str] = Field(None, description="项目状态")
+    relevance_score: float = Field(..., description="相关度分数")
+    match_reason: Optional[str] = Field(None, description="匹配原因")
+    notes: Optional[str] = Field(None, description="备注信息")
+    cost_items: Optional[List[Dict[str, Any]]] = Field(None, description="成本明细项(14级成本结构)")
 
 
 class RetrievalResult(BaseModel):

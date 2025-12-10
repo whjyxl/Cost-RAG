@@ -19,6 +19,7 @@ from app.schemas.document import (
 )
 from app.services.document_processor import document_processor
 from app.services.vector_service import vector_service
+from app.services.knowledge_graph_service import KnowledgeGraphService
 from app.core.config import settings
 from app.core.logging import logger
 
@@ -29,13 +30,15 @@ class DocumentService:
     def __init__(self):
         self.upload_dir = Path(settings.UPLOAD_DIR)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
+        self.knowledge_graph_service = KnowledgeGraphService()
 
     async def upload_document(
         self,
         file: UploadFile,
         user_id: int,
         document_data: DocumentCreate,
-        db: AsyncSession
+        db: AsyncSession,
+        generate_knowledge_graph: bool = True  # 是否生成知识图谱
     ) -> Document:
         """
         上传并处理文档
@@ -64,40 +67,50 @@ class DocumentService:
                 os.remove(file_path)
                 raise HTTPException(status_code=400, detail=validation_result['error'])
 
-            # 4. 计算文件哈希
+            # 4. 计算文件哈希和提取元数据
             file_hash = await document_processor._calculate_file_hash(file_path)
 
-            # 5. 检查是否已存在相同文件
+            # 5. 提取文件元数据
+            file_stats = os.stat(file_path)
+            file_extension = Path(file.filename).suffix.lower()
+
+            # 获取MIME类型
+            import mimetypes
+            mime_type = file.content_type or mimetypes.guess_type(file.filename)[0] or 'application/octet-stream'
+
+            # 6. 检查是否已存在相同文件
             existing_doc = await self._get_document_by_hash(file_hash, user_id, db)
             if existing_doc:
                 # 删除文件
                 os.remove(file_path)
                 raise HTTPException(status_code=409, detail="文件已存在")
 
-            # 6. 创建文档记录
+            # 7. 创建文档记录（包含所有必填字段）
             document = Document(
-                user_id=user_id,
+                uploaded_by=user_id,
                 title=document_data.title,
                 description=document_data.description,
                 category=document_data.category,
                 tags=document_data.tags or [],
-                project_id=document_data.project_id,
                 is_public=document_data.is_public,
                 file_hash=file_hash,
                 file_path=str(file_path),
-                processing_status=DocumentProcessingStatus(
-                    status="pending",
-                    progress=0.0,
-                    started_at=datetime.utcnow()
-                )
+                # 文件元数据字段（必填）
+                file_name=file.filename,
+                file_size=file_stats.st_size,
+                mime_type=mime_type,
+                file_extension=file_extension,
+                # 处理状态
+                status="pending",
+                processing_progress=0.0
             )
 
             db.add(document)
             await db.commit()
             await db.refresh(document)
 
-            # 7. 异步处理文档
-            await self._process_document_async(document.id, file_path, file.filename)
+            # 8. 异步处理文档
+            await self._process_document_async(document.id, file_path, file.filename, generate_knowledge_graph)
 
             logger.info(f"文档上传成功: {file.filename}, ID: {document.id}")
             return document
@@ -127,19 +140,43 @@ class DocumentService:
             logger.error(f"文件保存失败: {str(e)}")
             raise HTTPException(status_code=500, detail="文件保存失败")
 
-    async def _process_document_async(self, document_id: int, file_path: Path, filename: str):
+    async def _process_document_async(self, document_id: int, file_path: Path, filename: str, generate_knowledge_graph: bool = True):
         """异步处理文档"""
         try:
             # 这里应该使用任务队列（如Celery），暂时简化处理
-            await self._process_document(document_id, str(file_path), filename)
+            await self._process_document(document_id, str(file_path), filename, generate_knowledge_graph)
         except Exception as e:
-            logger.error(f"异步文档处理失败: {str(e)}")
+            logger.error(
+                f"异步文档处理失败 [document_id={document_id}, filename={filename}]: {str(e)}",
+                exc_info=True  # 添加完整的堆栈跟踪
+            )
+            # 确保文档状态被标记为失败
+            try:
+                from app.db.session import AsyncSessionLocal
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(select(Document).where(Document.id == document_id))
+                    document = result.scalar_one_or_none()
+                    if document and document.status != "failed":
+                        document.status = "failed"
+                        document.error_message = str(e)
+                        document.processing_progress = 0.0
+                        await db.commit()
+                        logger.info(f"文档 {document_id} 状态已更新为失败")
+            except Exception as update_error:
+                logger.error(f"更新文档失败状态时出错 [document_id={document_id}]: {update_error}", exc_info=True)
 
-    async def _process_document(self, document_id: int, file_path: str, filename: str):
-        """处理文档（文本提取、分块、向量化）"""
-        from app.db.session import get_db_session
+    async def _process_document(self, document_id: int, file_path: str, filename: str, generate_knowledge_graph: bool = True):
+        """处理文档（文本提取、分块、向量化）
+        
+        Args:
+            document_id: 文档ID
+            file_path: 文件路径
+            filename: 文件名
+            generate_knowledge_graph: 是否生成知识图谱，默认True
+        """
+        from app.db.session import AsyncSessionLocal
 
-        async with get_db_session() as db:
+        async with AsyncSessionLocal() as db:
             try:
                 # 获取文档记录
                 result = await db.execute(select(Document).where(Document.id == document_id))
@@ -149,8 +186,9 @@ class DocumentService:
                     return
 
                 # 更新处理状态
-                document.processing_status.status = "processing"
-                document.processing_status.progress = 0.1
+                document.status = "processing"
+                document.processing_progress = 10.0
+
                 await db.commit()
 
                 # 处理文档
@@ -158,96 +196,178 @@ class DocumentService:
 
                 if process_result['processing_status'] == 'error':
                     # 处理失败
-                    document.processing_status.status = "failed"
-                    document.processing_status.error_message = process_result.get('error_message', '未知错误')
-                    document.processing_status.progress = 0.0
-                    document.processing_status.completed_at = datetime.utcnow()
+                    document.status = "failed"
+                    document.error_message = process_result.get('error_message', '未知错误')
+                    document.processing_progress = 0.0
                     await db.commit()
                     return
 
                 # 更新文档信息
-                document.metadata = process_result.get('metadata', {})
-                document.total_length = process_result.get('total_length', 0)
+                document.doc_metadata = process_result.get('metadata', {})
+                document.word_count = process_result.get('word_count', 0)
                 document.chunk_count = process_result.get('chunk_count', 0)
-                document.processing_status.progress = 0.8
+                document.processing_progress = 80.0
+
                 await db.commit()
 
                 # 保存文档分块
                 chunks = process_result.get('chunks', [])
                 embeddings = process_result.get('embeddings')
+                
+                # 获取embedding配置（用于保存模型名称）
+                embedding_config = None
+                try:
+                    from app.models.system_config import SystemConfig
+                    config_result = await db.execute(
+                        select(SystemConfig).where(
+                            SystemConfig.category == 'embedding',
+                            SystemConfig.is_active == True
+                        )
+                    )
+                    configs = config_result.scalars().all()
+                    embedding_config = {}
+                    for config in configs:
+                        key = config.config_key.replace('embedding_', '')
+                        embedding_config[key] = config.config_value
+                except Exception as e:
+                    logger.warning(f"获取embedding配置失败: {str(e)}")
+                
+                # 调试日志
+                logger.info(f"文档 {document_id} - chunks数量: {len(chunks)}, embeddings类型: {type(embeddings)}, embeddings是否为None: {embeddings is None}")
+                if embeddings is not None:
+                    logger.info(f"文档 {document_id} - embeddings长度: {len(embeddings) if isinstance(embeddings, list) else 'N/A'}")
 
-                if chunks and embeddings is not None:
+                if chunks:
                     # 保存分块到数据库
-                    for chunk in chunks:
+                    for i, chunk in enumerate(chunks):
+                        # 获取对应的向量
+                        embedding_vector = None
+                        embedding_model_name = None
+                        
+                        if embeddings is not None and i < len(embeddings):
+                            # 转换为列表格式
+                            emb = embeddings[i]
+                            if hasattr(emb, 'tolist'):
+                                embedding_vector = emb.tolist()
+                            elif isinstance(emb, (list, tuple)):
+                                embedding_vector = list(emb)
+                            else:
+                                embedding_vector = [float(x) for x in emb]
+                            
+                            # 获取模型名称
+                            if embedding_config:
+                                provider = embedding_config.get('provider', 'unknown')
+                                model = embedding_config.get('model', 'unknown')
+                                embedding_model_name = f"{provider}/{model}"
+                        
                         document_chunk = DocumentChunk(
                             document_id=document_id,
                             chunk_index=chunk['chunk_index'],
                             content=chunk['content'],
-                            start_position=chunk.get('start_position', 0),
-                            end_position=chunk.get('end_position', 0),
-                            word_count=chunk.get('word_count', 0),
-                            char_count=chunk.get('char_count', 0)
+                            start_char=chunk.get('start_char', 0),
+                            end_char=chunk.get('end_char', 0),
+                            embedding_vector=embedding_vector,
+                            embedding_model=embedding_model_name
                         )
                         db.add(document_chunk)
 
                     await db.commit()
 
-                    # 向量化并存储
+                    # 向量化并存储（仅在embeddings可用时）
+                    logger.info(f"文档 {document_id} - 准备检查向量存储条件: embeddings is not None={embeddings is not None}, len(embeddings)={len(embeddings) if embeddings else 0}")
+                    if embeddings is not None and len(embeddings) > 0:
+                        logger.info(f"文档 {document_id} - 进入向量存储代码块")
+                        try:
+                            await vector_service.connect()
+                            logger.info(f"文档 {document_id} - vector_service连接成功")
+                            metadata = {
+                                'document_id': document_id,
+                                'title': document.title,
+                                'category': document.category,
+                                'tags': document.tags,
+                                'file_type': document.file_extension or '',
+                                'file_size': document.file_size or 0,
+                                'mime_type': document.mime_type or ''
+                            }
+                            if document.doc_metadata:
+                                metadata.update(document.doc_metadata)
+
+                            vector_ids = await vector_service.add_document_vectors(
+                                document_id=document_id,
+                                chunks=chunks,
+                                embeddings=embeddings,
+                                metadata=metadata
+                            )
+
+                            # 更新vector_count字段
+                            document.vector_count = len(embeddings)
+                            logger.info(f"文档 {document_id} - 向量存储成功，更新vector_count={len(embeddings)}")
+                            
+                            # 向量ID已存储到Qdrant，保存vector_count到数据库
+                            await db.commit()
+
+                        except Exception as e:
+                            logger.error(f"向量化失败: {str(e)}")
+                            # 向量化失败不影响文档处理完成
+                    else:
+                        logger.warning(f"文档 {document_id} 未生成向量，跳过向量化存储")
+
+                # 生成知识图谱（在向量化之后）
+                if generate_knowledge_graph:
                     try:
-                        await vector_service.connect()
-                        metadata = {
-                            'document_id': document_id,
-                            'title': document.title,
-                            'category': document.category,
-                            'tags': document.tags,
-                            'file_type': document.metadata.get('file_type', ''),
-                            **document.metadata
-                        }
-
-                        vector_ids = await vector_service.add_document_vectors(
-                            document_id=document_id,
-                            chunks=chunks,
-                            embeddings=embeddings,
-                            metadata=metadata
-                        )
-
-                        # 更新分块的向量ID
-                        for i, chunk in enumerate(chunks):
-                            if i < len(vector_ids):
-                                result = await db.execute(
-                                    select(DocumentChunk).where(
-                                        and_(
-                                            DocumentChunk.document_id == document_id,
-                                            DocumentChunk.chunk_index == chunk['chunk_index']
-                                        )
-                                    )
-                                )
-                                db_chunk = result.scalar_one_or_none()
-                                if db_chunk:
-                                    db_chunk.vector_id = vector_ids[i]
-
+                        logger.info(f"开始为文档 {document_id} 生成知识图谱...")
+                        document.processing_progress = 90.0
                         await db.commit()
 
-                    except Exception as e:
-                        logger.error(f"向量化失败: {str(e)}")
-                        # 向量化失败不影响文档处理完成
+                        # 调用知识图谱服务处理文档
+                        kg_result = await self.knowledge_graph_service.process_document_knowledge(
+                            document_id=document_id,
+                            user_id=document.uploaded_by,
+                            db=db
+                        )
+
+                        if kg_result:
+                            logger.info(
+                                f"知识图谱生成成功 [document_id={document_id}]: "
+                                f"实体={kg_result.get('entities_count', 0)}, "
+                                f"关系={kg_result.get('relations_count', 0)}"
+                            )
+                        else:
+                            logger.warning(f"文档 {document_id} 知识图谱生成返回空结果")
+
+                    except Exception as kg_error:
+                        # 知识图谱生成失败不影响文档处理完成
+                        logger.error(
+                            f"知识图谱生成失败 [document_id={document_id}]: {str(kg_error)}",
+                            exc_info=True
+                        )
+                        # 不抛出异常，让文档处理继续完成
+                else:
+                    logger.info(f"文档 {document_id} 跳过知识图谱生成（用户选择）")
 
                 # 标记处理完成
-                document.processing_status.status = "completed"
-                document.processing_status.progress = 1.0
-                document.processing_status.completed_at = datetime.utcnow()
+                document.status = "completed"
+                document.processing_progress = 100.0
+
                 await db.commit()
 
                 logger.info(f"文档处理完成: {document_id}")
 
             except Exception as e:
                 logger.error(f"文档处理失败 {document_id}: {str(e)}")
+                await db.rollback()
                 # 标记处理失败
-                if document:
-                    document.processing_status.status = "failed"
-                    document.processing_status.error_message = str(e)
-                    document.processing_status.completed_at = datetime.utcnow()
-                    await db.commit()
+                try:
+                    result = await db.execute(select(Document).where(Document.id == document_id))
+                    document = result.scalar_one_or_none()
+                    if document:
+                        document.status = "failed"
+                        document.error_message = str(e)
+                        await db.commit()
+                except Exception as commit_error:
+                    logger.error(f"更新文档失败状态时出错: {commit_error}")
+            finally:
+                await db.close()
 
     async def get_document(
         self,
@@ -260,8 +380,7 @@ class DocumentService:
             select(Document).where(
                 and_(
                     Document.id == document_id,
-                    Document.user_id == user_id,
-                    Document.is_active == True
+                    Document.uploaded_by == user_id
                 )
             )
         )
@@ -270,27 +389,25 @@ class DocumentService:
     async def get_documents(
         self,
         user_id: int,
+        db: AsyncSession,
         skip: int = 0,
         limit: int = 20,
         category: Optional[str] = None,
         project_id: Optional[int] = None,
-        search: Optional[str] = None,
-        db: AsyncSession
+        search: Optional[str] = None
     ) -> Tuple[List[Document], int]:
         """获取用户文档列表"""
         query = select(Document).where(
-            and_(
-                Document.user_id == user_id,
-                Document.is_active == True
-            )
+            Document.uploaded_by == user_id
         )
 
         # 添加过滤条件
         if category:
             query = query.where(Document.category == category)
 
-        if project_id:
-            query = query.where(Document.project_id == project_id)
+        # TODO: project_id field doesn't exist in Document model yet
+        # if project_id:
+        #     query = query.where(Document.project_id == project_id)
 
         if search:
             query = query.where(
@@ -324,8 +441,7 @@ class DocumentService:
             select(Document).where(
                 and_(
                     Document.id == document_id,
-                    Document.user_id == user_id,
-                    Document.is_active == True
+                    Document.uploaded_by == user_id
                 )
             )
         )
@@ -356,8 +472,7 @@ class DocumentService:
             select(Document).where(
                 and_(
                     Document.id == document_id,
-                    Document.user_id == user_id,
-                    Document.is_active == True
+                    Document.uploaded_by == user_id
                 )
             )
         )
@@ -365,11 +480,6 @@ class DocumentService:
 
         if not document:
             return False
-
-        # 软删除
-        document.is_active = False
-        document.updated_at = datetime.utcnow()
-        await db.commit()
 
         # 删除向量数据
         try:
@@ -384,6 +494,10 @@ class DocumentService:
         except Exception as e:
             logger.error(f"删除文件失败: {str(e)}")
 
+        # 真删除（从数据库中删除记录）
+        await db.delete(document)
+        await db.commit()
+
         logger.info(f"文档删除成功: {document_id}")
         return True
 
@@ -395,10 +509,7 @@ class DocumentService:
     ) -> List[Dict[str, Any]]:
         """搜索文档"""
         query = select(Document).where(
-            and_(
-                Document.user_id == user_id,
-                Document.is_active == True
-            )
+            Document.uploaded_by == user_id
         )
 
         # 添加搜索条件
@@ -424,7 +535,7 @@ class DocumentService:
             file_type_conditions = []
             for file_type in search_request.file_types:
                 file_type_conditions.append(
-                    Document.metadata['file_type'].astext == file_type
+                    Document.file_extension == file_type
                 )
             query = query.where(or_(*file_type_conditions))
 
@@ -448,12 +559,12 @@ class DocumentService:
                 'description': doc.description,
                 'category': doc.category,
                 'tags': doc.tags,
-                'file_type': doc.metadata.get('file_type', '') if doc.metadata else '',
-                'file_size': doc.metadata.get('file_size', 0) if doc.metadata else 0,
-                'processing_status': doc.processing_status.status,
+                'file_type': doc.file_extension or '',
+                'file_size': doc.file_size or 0,
+                'processing_status': doc.status or 'pending',
                 'chunk_count': doc.chunk_count,
                 'created_at': doc.created_at,
-                'updated_at': doc.updated_at,
+                'updated_at': doc.updated_at or doc.created_at,
                 'relevance_score': 1.0  # 简化处理
             })
 
@@ -470,13 +581,66 @@ class DocumentService:
             # 连接向量数据库
             await vector_service.connect()
 
+            # 从数据库读取embedding配置
+            from sqlalchemy import select
+            from app.models.system_config import SystemConfig
+            from app.db.session import AsyncSessionLocal
+            
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(SystemConfig).where(
+                        SystemConfig.category == "embedding",
+                        SystemConfig.is_active == True
+                    )
+                )
+                configs = result.scalars().all()
+                
+                embedding_config = {}
+                for config in configs:
+                    key = config.config_key.replace("embedding_", "")
+                    embedding_config[key] = config.config_value
+            
+            provider = embedding_config.get('provider', 'dashscope')
+            model = embedding_config.get('model', 'text-embedding-v2')
+            api_key = embedding_config.get('api_key', '')
+            
+            logger.info(f"查询向量生成 - 供应商：{provider}, 模型：{model}")
+            
             # 生成查询向量
-            from sentence_transformers import SentenceTransformer
-            embedding_model = SentenceTransformer('shibing624/text2vec-base-chinese')
-            query_vector = embedding_model.encode([search_request.query])[0]
-
-            # 构建过滤条件
-            filters = {'user_id': user_id}
+            query_vector = None
+            if provider in ['dashscope', 'qwen'] and api_key:
+                try:
+                    import dashscope
+                    from dashscope import TextEmbedding
+                    
+                    dashscope.api_key = api_key
+                    
+                    # 根据模型名称选择对应的模型
+                    model_enum = TextEmbedding.Models.text_embedding_v2
+                    if 'v1' in model.lower():
+                        model_enum = TextEmbedding.Models.text_embedding_v1
+                    elif 'v3' in model.lower():
+                        model_enum = TextEmbedding.Models.text_embedding_v3
+                    
+                    response = TextEmbedding.call(
+                        model=model_enum,
+                        input=search_request.query[:2000]
+                    )
+                    
+                    if response.status_code == 200:
+                        query_vector = response.output['embeddings'][0]['embedding']
+                        logger.info(f'使用{provider}/{model}生成查询向量成功')
+                except Exception as e:
+                    logger.error(f"生成查询向量失败: {str(e)}")
+            
+            if query_vector is None:
+                logger.error("无法生成查询向量，embedding配置可能有误")
+                return []
+            
+            filters = {}
+            # 只在需要时添加用户过滤
+            # if search_request.filters and search_request.filters.get('user_only'):
+            #     filters['user_id'] = user_id
             if search_request.filters:
                 filters.update(search_request.filters)
 
@@ -499,8 +663,7 @@ class DocumentService:
                     select(Document).where(
                         and_(
                             Document.id == document_id,
-                            Document.user_id == user_id,
-                            Document.is_active == True
+                            or_(Document.is_public == True, Document.uploaded_by == user_id)
                         )
                     )
                 )
@@ -532,23 +695,19 @@ class DocumentService:
         try:
             # 基础统计
             total_docs_query = select(func.count(Document.id)).where(
-                and_(
-                    Document.user_id == user_id,
-                    Document.is_active == True
-                )
+                or_(Document.is_public == True, Document.uploaded_by == user_id)
             )
             total_docs_result = await db.execute(total_docs_query)
             total_documents = total_docs_result.scalar() or 0
 
             # 文件类型分布
             file_type_query = select(
-                func.json_extract(Document.metadata, '$.file_type').label('file_type'),
+                Document.file_extension.label('file_type'),
                 func.count().label('count')
             ).where(
                 and_(
-                    Document.user_id == user_id,
-                    Document.is_active == True,
-                    Document.metadata.isnot(None)
+                    or_(Document.is_public == True, Document.uploaded_by == user_id),
+                    Document.file_extension.isnot(None)
                 )
             ).group_by('file_type')
             file_type_result = await db.execute(file_type_query)
@@ -563,8 +722,7 @@ class DocumentService:
                 func.count().label('count')
             ).where(
                 and_(
-                    Document.user_id == user_id,
-                    Document.is_active == True,
+                    or_(Document.is_public == True, Document.uploaded_by == user_id),
                     Document.category.isnot(None)
                 )
             ).group_by(Document.category)
@@ -576,13 +734,10 @@ class DocumentService:
 
             # 处理状态分布
             status_query = select(
-                Document.processing_status['status'].astext.label('status'),
+                Document.status.label('status'),
                 func.count().label('count')
             ).where(
-                and_(
-                    Document.user_id == user_id,
-                    Document.is_active == True
-                )
+                or_(Document.is_public == True, Document.uploaded_by == user_id)
             ).group_by('status')
             status_result = await db.execute(status_query)
             processing_status_distribution = {
@@ -598,8 +753,7 @@ class DocumentService:
                 func.count().label('count')
             ).where(
                 and_(
-                    Document.user_id == user_id,
-                    Document.is_active == True,
+                    or_(Document.is_public == True, Document.uploaded_by == user_id),
                     Document.created_at >= seven_days_ago
                 )
             ).group_by(func.date(Document.created_at)).order_by('date')
@@ -609,32 +763,46 @@ class DocumentService:
                 for row in timeline_result
             ]
 
-            # 热门标签
-            tags_query = select(
-                func.json_each(Document.tags).label('tag'),
-                func.count().label('count')
-            ).where(
-                and_(
-                    Document.user_id == user_id,
-                    Document.is_active == True,
-                    Document.tags.isnot(None)
-                )
-            ).group_by('tag').order_by(desc('count')).limit(10)
-            tags_result = await db.execute(tags_query)
-            popular_tags = [
-                {'tag': row.tag, 'count': row.count}
-                for row in tags_result
-            ]
+            # 热门标签（PostgreSQL使用unnest，SQLite使用json_each）
+            try:
+                if settings.DATABASE_URL.startswith('sqlite'):
+                    # SQLite语法
+                    tags_query = select(
+                        func.json_each(Document.tags).label('tag'),
+                        func.count().label('count')
+                    ).where(
+                        and_(
+                            or_(Document.is_public == True, Document.uploaded_by == user_id),
+                            Document.tags.isnot(None)
+                        )
+                    ).group_by('tag').order_by(desc('count')).limit(10)
+                else:
+                    # PostgreSQL语法
+                    tags_query = select(
+                        func.unnest(Document.tags).label('tag'),
+                        func.count().label('count')
+                    ).where(
+                        and_(
+                            or_(Document.is_public == True, Document.uploaded_by == user_id),
+                            Document.tags.isnot(None),
+                            func.array_length(Document.tags, 1).isnot(None)
+                        )
+                    ).group_by('tag').order_by(desc('count')).limit(10)
+
+                tags_result = await db.execute(tags_query)
+                popular_tags = [
+                    {'tag': row.tag, 'count': row.count}
+                    for row in tags_result
+                ]
+            except Exception as e:
+                logger.warning(f"热门标签查询失败: {str(e)}")
+                popular_tags = []
 
             # 文件总大小
             size_query = select(
-                func.sum(func.cast(func.json_extract(Document.metadata, '$.file_size'), func.Integer))
+                func.sum(Document.file_size)
             ).where(
-                and_(
-                    Document.user_id == user_id,
-                    Document.is_active == True,
-                    Document.metadata.isnot(None)
-                )
+                or_(Document.is_public == True, Document.uploaded_by == user_id)
             )
             size_result = await db.execute(size_query)
             total_size = size_result.scalar() or 0
@@ -672,8 +840,7 @@ class DocumentService:
             select(Document).where(
                 and_(
                     Document.file_hash == file_hash,
-                    Document.user_id == user_id,
-                    Document.is_active == True
+                    or_(Document.is_public == True, Document.uploaded_by == user_id)
                 )
             )
         )

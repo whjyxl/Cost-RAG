@@ -6,12 +6,26 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, desc, asc
-import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+# 基础导入
 import pandas as pd
+
+# 可选导入 - 优雅降级
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    logger.warning("⚠️ numpy 未安装，部分数值计算功能将受限")
+
+try:
+    from sklearn.linear_model import LinearRegression
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+    logger.warning("⚠️ sklearn 未安装，高级成本估算功能将受限")
 
 from app.models.project import Project, CostEstimate, CostItem, ProjectType
 from app.models.document import Document
@@ -26,12 +40,24 @@ class CostEstimationService:
     """成本估算服务类"""
 
     def __init__(self):
-        self.ml_models = {
-            'linear_regression': LinearRegression(),
-            'random_forest': RandomForestRegressor(n_estimators=100, random_state=42)
-        }
-        self.scaler = StandardScaler()
+        # 机器学习模型 - 优雅降级
+        if SKLEARN_AVAILABLE:
+            self.ml_models = {
+                'linear_regression': LinearRegression(),
+                'random_forest': RandomForestRegressor(n_estimators=100, random_state=42),
+            }
+            self.scaler = StandardScaler()
+            logger.info("✅ sklearn 机器学习模型已初始化")
+        else:
+            self.ml_models = {}
+            self.scaler = None
+            logger.warning("⚠️ sklearn 不可用，机器学习功能已禁用")
+
         self.model_trained = False
+        self.feature_columns = [
+            'project_type', 'total_area', 'floor_count', 'region_level',
+            'building_type', 'structure_type', 'foundation_type'
+        ]
 
     async def create_cost_estimate(
         self,
@@ -56,7 +82,7 @@ class CostEstimationService:
                 select(Project).where(
                     and_(
                         Project.id == estimate_data.project_id,
-                        Project.user_id == user_id
+                        Project.owner_id == user_id
                     )
                 )
             )
@@ -64,24 +90,12 @@ class CostEstimationService:
             if not project:
                 raise ValueError("项目不存在或无权限访问")
 
-            # 创建估算记录
+            # 创建估算记录（适配当前模型字段）
             cost_estimate = CostEstimate(
                 project_id=estimate_data.project_id,
-                title=estimate_data.title,
-                description=estimate_data.description,
-                estimated_budget=estimate_data.estimated_budget,
-                currency=estimate_data.currency,
-                estimation_method=estimate_data.estimation_method,
-                confidence_level=estimate_data.confidence_level,
-                risk_factors=estimate_data.risk_factors or [],
-                assumptions=estimate_data.assumptions or [],
-                constraints=estimate_data.constraints or [],
-                estimated_duration_days=estimate_data.estimated_duration_days,
-                estimated_start_date=estimate_data.estimated_start_date,
-                estimated_end_date=estimate_data.estimated_end_date,
-                team_size=estimate_data.team_size,
-                complexity_level=estimate_data.complexity_level,
-                technology_stack=estimate_data.technology_stack or [],
+                name=getattr(estimate_data, "title", "成本估算"),
+                description=getattr(estimate_data, "description", None),
+                total_cost=float(getattr(estimate_data, "estimated_budget", 0.0) or 0.0),
                 created_by=user_id
             )
 
@@ -90,20 +104,20 @@ class CostEstimationService:
             await db.refresh(cost_estimate)
 
             # 创建成本项目
-            if estimate_data.cost_items:
+            if getattr(estimate_data, "cost_items", None):
                 for item_data in estimate_data.cost_items:
+                    quantity = float(getattr(item_data, "quantity", 0.0) or 0.0)
+                    unit_price = float(getattr(item_data, "unit_price", 0.0) or 0.0)
                     cost_item = CostItem(
                         estimate_id=cost_estimate.id,
-                        category=item_data.category,
-                        name=item_data.name,
-                        description=item_data.description,
-                        quantity=item_data.quantity,
-                        unit_price=item_data.unit_price,
-                        total_cost=item_data.quantity * item_data.unit_price,
-                        unit_of_measure=item_data.unit_of_measure,
-                        cost_type=item_data.cost_type,
-                        is_optional=item_data.is_optional,
-                        dependencies=item_data.dependencies or []
+                        category=getattr(item_data, "category", "其他") or "其他",
+                        subcategory=getattr(item_data, "subcategory", None),
+                        item_code=getattr(item_data, "item_code", None),
+                        item_name=getattr(item_data, "name", "未命名成本项") or "未命名成本项",
+                        unit=getattr(item_data, "unit_of_measure", "unit") or "unit",
+                        quantity=quantity,
+                        unit_price=unit_price,
+                        total_price=quantity * unit_price
                     )
                     db.add(cost_item)
 
@@ -120,10 +134,10 @@ class CostEstimationService:
     async def get_cost_estimates(
         self,
         user_id: int,
+        db: AsyncSession,
         project_id: Optional[int] = None,
         skip: int = 0,
-        limit: int = 20,
-        db: AsyncSession
+        limit: int = 20
     ) -> Tuple[List[CostEstimate], int]:
         """获取成本估算列表"""
         query = select(CostEstimate).where(CostEstimate.created_by == user_id)
@@ -213,7 +227,7 @@ class CostEstimationService:
             # 获取项目数据
             project_query = select(Project).where(
                 and_(
-                    Project.user_id == user_id,
+                    Project.owner_id == user_id,
                     Project.actual_cost.isnot(None),
                     Project.estimated_budget.isnot(None)
                 )
@@ -453,7 +467,7 @@ class CostEstimationService:
             result = await db.execute(
                 select(Project).where(
                     and_(
-                        Project.user_id == user_id,
+                        Project.owner_id == user_id,
                         Project.actual_cost.isnot(None),
                         Project.estimated_budget.isnot(None),
                         Project.project_type == prediction_request.project_type
@@ -684,7 +698,7 @@ class CostEstimationService:
                 select(Project).where(
                     and_(
                         Project.id == project_id,
-                        Project.user_id == user_id
+                        Project.owner_id == user_id
                     )
                 )
             )
@@ -788,6 +802,173 @@ class CostEstimationService:
         except Exception as e:
             logger.error(f"生成成本报告失败: {str(e)}")
             raise
+
+    async def search_cost_data(
+        self,
+        query: str,
+        max_results: int = 10,
+        filters: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        搜索历史项目成本数据
+
+        Args:
+            query: 搜索查询字符串
+            max_results: 最大返回结果数
+            filters: 可选过滤条件
+
+        Returns:
+            搜索结果字典，包含results列表
+        """
+        try:
+            from app.db.session import AsyncSessionLocal
+            from app.models.project_template import ProjectTemplate
+            from sqlalchemy.orm import selectinload
+
+            async with AsyncSessionLocal() as db:
+                # 构建基础查询 - 查询ProjectTemplate表（用户上传的Excel成本数据）
+                # 使用selectinload预加载cost_items关联数据
+                query_stmt = select(ProjectTemplate).where(
+                    and_(
+                        ProjectTemplate.total_cost.isnot(None),  # 有成本数据
+                        ProjectTemplate.is_enabled == True  # 启用的模板
+                    )
+                ).options(
+                    selectinload(ProjectTemplate.cost_items)  # 预加载成本明细
+                )
+
+                # 应用搜索过滤 - 智能关键词提取
+                search_conditions = []
+                if query:
+                    # 提取关键词：去除疑问词和常用词
+                    import re
+                    # 去除疑问词和无意义词（包括宽泛的通用词）
+                    stop_words = ['有哪些', '什么', '哪些', '的', '？', '?', '数据', '是', '吗', '呢', '吧',
+                                  '项目', '成本']  # 添加"项目"和"成本"到停用词，避免过度过滤
+                    keywords = query
+                    for word in stop_words:
+                        keywords = keywords.replace(word, ' ')
+
+                    # 提取有意义的词（长度>=2的词）
+                    meaningful_words = [w.strip() for w in re.split(r'[\s,，、]+', keywords) if len(w.strip()) >= 2]
+
+                    # 只有当提取到具体的关键词时才进行过滤（如"商业"、"西安"等）
+                    if meaningful_words:
+                        # 使用关键词进行OR匹配
+                        keyword_conditions = []
+                        for word in meaningful_words:
+                            word_pattern = f"%{word.lower()}%"
+                            keyword_conditions.append(
+                                or_(
+                                    func.lower(ProjectTemplate.name).like(word_pattern),
+                                    func.lower(ProjectTemplate.source_file).like(word_pattern)
+                                )
+                            )
+                        if keyword_conditions:
+                            search_conditions.append(or_(*keyword_conditions))
+                    # 如果没有提取到关键词，返回所有项目（不添加search_conditions）
+
+                # 应用额外过滤条件
+                if filters:
+                    if filters.get('project_type'):
+                        search_conditions.append(ProjectTemplate.project_type == filters['project_type'])
+                    if filters.get('min_area'):
+                        search_conditions.append(ProjectTemplate.area >= filters['min_area'])
+                    if filters.get('max_area'):
+                        search_conditions.append(ProjectTemplate.area <= filters['max_area'])
+
+                if search_conditions:
+                    query_stmt = query_stmt.where(and_(*search_conditions))
+
+                # 排序：优先显示最近的项目
+                query_stmt = query_stmt.order_by(desc(ProjectTemplate.created_at)).limit(max_results)
+
+                # 执行查询 - 获取ORM对象
+                result = await db.execute(query_stmt)
+                projects = result.scalars().all()
+
+                # 格式化结果
+                results = []
+                for proj in projects:
+                    # 计算相关度分数（简单实现）
+                    relevance_score = 0.5  # 基础分数
+                    if query:
+                        query_lower = query.lower()
+                        # 项目名称匹配
+                        if proj.name and query_lower in proj.name.lower():
+                            relevance_score += 0.4
+                        # 来源文件匹配
+                        if proj.source_file and query_lower in proj.source_file.lower():
+                            relevance_score += 0.1
+
+                    # 确保分数在0-1范围内
+                    relevance_score = min(1.0, relevance_score)
+
+                    # 处理成本明细数据（14级结构）
+                    cost_items_data = []
+                    if proj.cost_items:
+                        for item in proj.cost_items:
+                            cost_items_data.append({
+                                "item_code": item.item_code,
+                                "item_name": item.item_name,
+                                "item_type": item.item_type,
+                                "unit_price": item.unit_price,
+                                "total_price": item.total_price,
+                                "is_primary_section": item.is_primary_section,
+                                "is_secondary_section": item.is_secondary_section
+                            })
+
+                    cost_data = {
+                        "id": proj.id,
+                        "project_id": proj.id,
+                        "project_name": proj.name or "未命名项目",
+                        "project_type": proj.project_type if proj.project_type else "未知",
+                        "location": None,  # ProjectTemplate没有此字段
+                        "building_area": proj.area,
+                        "unit_price": round(proj.unit_cost, 2) if proj.unit_cost else None,
+                        "total_cost": proj.total_cost,
+                        "floors": proj.floors,
+                        "structure_type": None,  # ProjectTemplate没有此字段
+                        "completion_date": proj.completion_date_parsed.isoformat() if proj.completion_date_parsed else None,
+                        "status": "历史数据",
+                        "relevance_score": relevance_score,
+                        "match_reason": self._generate_match_reason(query, proj),
+                        "notes": f"来源: {proj.source_file}" if proj.source_file else None,
+                        "cost_items": cost_items_data  # 添加14级成本明细数据
+                    }
+                    results.append(cost_data)
+
+                # 按相关度排序
+                results.sort(key=lambda x: x['relevance_score'], reverse=True)
+
+                logger.info(f"成本数据检索: 查询='{query}', 结果={len(results)}个项目")
+
+                return {
+                    "results": results,
+                    "total": len(results),
+                    "query": query
+                }
+
+        except Exception as e:
+            logger.error(f"搜索成本数据失败: {str(e)}", exc_info=True)
+            return {"results": [], "total": 0, "query": query}
+
+    def _generate_match_reason(self, query: str, project: Any) -> str:
+        """生成匹配原因说明"""
+        reasons = []
+        if query:
+            query_lower = query.lower()
+            if hasattr(project, 'name') and project.name and query_lower in project.name.lower():
+                reasons.append(f"项目名称包含'{query}'")
+            if hasattr(project, 'source_file') and project.source_file and query_lower in project.source_file.lower():
+                reasons.append(f"来源文件匹配'{query}'")
+            if hasattr(project, 'project_type') and project.project_type and query_lower in project.project_type.lower():
+                reasons.append(f"项目类型包含'{query}'")
+
+        if not reasons:
+            reasons.append("历史项目成本数据")
+
+        return "；".join(reasons)
 
 
 # 全局成本估算服务实例

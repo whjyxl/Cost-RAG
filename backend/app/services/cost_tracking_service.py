@@ -11,7 +11,7 @@ import asyncio
 import logging
 from decimal import Decimal
 
-from app.core.database import get_db
+from app.db.session import get_async_session
 from app.models.user import User
 from app.schemas.ai_model import UsageStatistics, CostAnalysis, AIProvider
 from app.services.ai_model_service import AIModelService

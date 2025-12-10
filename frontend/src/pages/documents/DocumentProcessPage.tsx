@@ -33,6 +33,9 @@ import {
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd'
 
+// 引入样式
+import './Documents.css'
+
 const { Title, Text, Paragraph } = Typography
 const { Step } = Steps
 
@@ -65,115 +68,104 @@ const DocumentProcessPage: React.FC = () => {
   const [selectedItem, setSelectedItem] = useState<ProcessingItem | null>(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
 
-  // 模拟数据
+  // 加载处理任务列表
   useEffect(() => {
-    const mockData: ProcessingItem[] = [
-      {
-        id: '1',
-        name: '工程造价管理规范.pdf',
-        type: 'PDF',
-        size: '2.0 MB',
-        status: 'completed',
-        progress: 100,
-        currentStep: 4,
-        uploadTime: '2024-01-20 10:30:00',
-        startTime: '2024-01-20 10:30:05',
-        estimatedTime: '2分钟',
-        processingLog: [
-          { time: '2024-01-20 10:30:05', step: '文件验证', status: 'success', message: '文件格式验证通过' },
-          { time: '2024-01-20 10:30:15', step: '文本提取', status: 'success', message: '成功提取文本内容' },
-          { time: '2024-01-20 10:30:45', step: '智能分块', status: 'success', message: '文本分块完成，共生成15个片段' },
-          { time: '2024-01-20 10:31:05', step: '向量化处理', status: 'success', message: '向量化处理完成，生成512维向量' },
-          { time: '2024-01-20 10:31:15', step: '索引构建', status: 'success', message: '索引构建完成' },
-        ],
-      },
-      {
-        id: '2',
-        name: '建筑项目预算模板.xlsx',
-        type: 'Excel',
-        size: '1.0 MB',
-        status: 'processing',
-        progress: 65,
-        currentStep: 3,
-        uploadTime: '2024-01-20 14:20:00',
-        startTime: '2024-01-20 14:20:10',
-        estimatedTime: '3分钟',
-        processingLog: [
-          { time: '2024-01-20 14:20:10', step: '文件验证', status: 'success', message: '文件格式验证通过' },
-          { time: '2024-01-20 14:20:20', step: '数据提取', status: 'success', message: 'Excel数据提取完成' },
-          { time: '2024-01-20 14:20:35', step: '智能分块', status: 'info', message: '正在处理文本分块...' },
-        ],
-      },
-      {
-        id: '3',
-        name: '施工合同范本.docx',
-        type: 'Word',
-        size: '512 KB',
-        status: 'processing',
-        progress: 30,
-        currentStep: 2,
-        uploadTime: '2024-01-20 15:45:00',
-        startTime: '2024-01-20 15:45:15',
-        estimatedTime: '1分钟',
-        processingLog: [
-          { time: '2024-01-20 15:45:15', step: '文件验证', status: 'success', message: '文件格式验证通过' },
-          { time: '2024-01-20 15:45:20', step: '文本提取', status: 'info', message: '正在提取Word文档内容...' },
-        ],
-      },
-      {
-        id: '4',
-        name: '建筑材料价格表.txt',
-        type: 'Text',
-        size: '256 KB',
-        status: 'failed',
-        progress: 25,
-        currentStep: 1,
-        uploadTime: '2024-01-20 16:30:00',
-        startTime: '2024-01-20 16:30:05',
-        estimatedTime: '30秒',
-        errorMessage: '文件编码格式不支持，请转换为UTF-8编码后重新上传',
-        processingLog: [
-          { time: '2024-01-20 16:30:05', step: '文件验证', status: 'success', message: '文件格式验证通过' },
-          { time: '2024-01-20 16:30:10', step: '文本提取', status: 'error', message: '文件编码格式不支持' },
-        ],
-      },
-      {
-        id: '5',
-        name: '项目可行性研究报告.pdf',
-        type: 'PDF',
-        size: '3.0 MB',
-        status: 'pending',
-        progress: 0,
-        currentStep: 0,
-        uploadTime: '2024-01-20 17:00:00',
-        estimatedTime: '2分钟',
-        processingLog: [],
-      },
-    ]
-    setProcessingItems(mockData)
+    fetchProcessingItems()
   }, [])
 
-  // 自动刷新进度
+  // 从API获取处理任务
+  const fetchProcessingItems = async () => {
+    setLoading(true)
+    try {
+      const response = await fetch('/api/v1/documents/', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`获取处理任务失败: ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      // 转换后端数据格式为前端格式
+      const formattedItems: ProcessingItem[] = (data.documents || []).map((doc: any) => {
+        // 计算文件类型
+        const getFileType = (fileName: string, mimeType: string) => {
+          const ext = fileName.split('.').pop()?.toUpperCase()
+          if (ext === 'PDF') return 'PDF'
+          if (['DOC', 'DOCX'].includes(ext || '')) return 'Word'
+          if (['XLS', 'XLSX'].includes(ext || '')) return 'Excel'
+          if (['TXT', 'MD'].includes(ext || '')) return 'Text'
+          return ext || 'Unknown'
+        }
+
+        // 格式化文件大小
+        const formatSize = (bytes: number) => {
+          if (!bytes) return '0 B'
+          const k = 1024
+          const sizes = ['B', 'KB', 'MB', 'GB']
+          const i = Math.floor(Math.log(bytes) / Math.log(k))
+          return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i]
+        }
+
+        // 映射状态
+        const mapStatus = (status: string): 'pending' | 'processing' | 'completed' | 'failed' => {
+          if (status === 'pending') return 'pending'
+          if (status === 'processing') return 'processing'
+          if (status === 'completed') return 'completed'
+          if (status === 'failed') return 'failed'
+          return 'pending'
+        }
+
+        // 计算当前步骤（基于进度）
+        const getCurrentStep = (progress: number) => {
+          if (progress >= 100) return 5
+          if (progress >= 80) return 4
+          if (progress >= 60) return 3
+          if (progress >= 40) return 2
+          if (progress >= 20) return 1
+          return 0
+        }
+
+        const progress = doc.processing_progress || 0
+        const status = mapStatus(doc.status)
+
+        return {
+          id: doc.id.toString(),
+          name: doc.file_name || doc.title || '未命名文档',
+          type: getFileType(doc.file_name || '', doc.file_type || ''),
+          size: formatSize(doc.file_size || 0),
+          status: status,
+          progress: Math.round(progress),
+          currentStep: getCurrentStep(progress),
+          uploadTime: doc.created_at ? new Date(doc.created_at).toLocaleString('zh-CN') : '-',
+          startTime: doc.processed_at ? new Date(doc.processed_at).toLocaleString('zh-CN') : undefined,
+          estimatedTime: status === 'processing' ? '处理中...' : undefined,
+          errorMessage: doc.error_message || undefined,
+          processingLog: [], // 处理日志暂时为空，需要后端支持
+        }
+      })
+
+      setProcessingItems(formattedItems)
+    } catch (error) {
+      console.error('获取处理任务失败:', error)
+      message.error('获取处理任务失败，请稍后重试')
+      setProcessingItems([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 自动刷新进度（每5秒调用真实API）
   useEffect(() => {
     if (!autoRefresh) return
 
     const interval = setInterval(() => {
-      setProcessingItems(prev => prev.map(item => {
-        if (item.status === 'processing' && item.progress < 100) {
-          const newProgress = Math.min(item.progress + Math.random() * 15, 100)
-          const newStatus = newProgress >= 100 ? 'completed' : 'processing'
-          const newStep = newStatus === 'completed' ? 4 : Math.min(item.currentStep + (newProgress >= 25 ? 1 : 0), 4)
-
-          return {
-            ...item,
-            progress: Math.round(newProgress),
-            status: newStatus,
-            currentStep: newStep,
-          }
-        }
-        return item
-      }))
-    }, 2000)
+      fetchProcessingItems()
+    }, 5000) // 每5秒刷新一次
 
     return () => clearInterval(interval)
   }, [autoRefresh])
@@ -219,29 +211,76 @@ const DocumentProcessPage: React.FC = () => {
   }
 
   // 重试处理
-  const handleRetry = (id: string) => {
-    setProcessingItems(prev => prev.map(item =>
-      item.id === id
-        ? { ...item, status: 'processing', progress: 0, currentStep: 0, errorMessage: undefined }
-        : item
-    ))
-    message.success('已重新加入处理队列')
+  const handleRetry = async (id: string) => {
+    try {
+      // TODO: 后端需要提供重试API
+      // const response = await fetch(`/api/v1/documents/${id}/retry`, {
+      //   method: 'POST',
+      //   headers: {
+      //     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+      //     'Content-Type': 'application/json',
+      //   },
+      // })
+
+      // 暂时使用前端模拟（等待后端API）
+      setProcessingItems(prev => prev.map(item =>
+        item.id === id
+          ? { ...item, status: 'processing', progress: 0, currentStep: 0, errorMessage: undefined }
+          : item
+      ))
+      message.success('已重新加入处理队列（注：后端API待实现）')
+    } catch (error) {
+      console.error('重试失败:', error)
+      message.error('重试失败，请稍后重试')
+    }
   }
 
   // 停止处理
-  const handleStop = (id: string) => {
-    setProcessingItems(prev => prev.map(item =>
-      item.id === id
-        ? { ...item, status: 'pending', progress: 0, currentStep: 0 }
-        : item
-    ))
-    message.info('已停止处理')
+  const handleStop = async (id: string) => {
+    try {
+      // TODO: 后端需要提供停止API
+      // const response = await fetch(`/api/v1/documents/${id}/stop`, {
+      //   method: 'POST',
+      //   headers: {
+      //     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+      //     'Content-Type': 'application/json',
+      //   },
+      // })
+
+      // 暂时使用前端模拟（等待后端API）
+      setProcessingItems(prev => prev.map(item =>
+        item.id === id
+          ? { ...item, status: 'pending', progress: 0, currentStep: 0 }
+          : item
+      ))
+      message.info('已停止处理（注：后端API待实现）')
+    } catch (error) {
+      console.error('停止失败:', error)
+      message.error('停止失败，请稍后重试')
+    }
   }
 
   // 清理完成项
-  const handleClearCompleted = () => {
-    setProcessingItems(prev => prev.filter(item => item.status !== 'completed'))
-    message.success('已清理完成项')
+  const handleClearCompleted = async () => {
+    try {
+      // TODO: 后端需要提供批量删除API
+      // const completedIds = processingItems.filter(item => item.status === 'completed').map(item => item.id)
+      // const response = await fetch('/api/v1/documents/batch-delete', {
+      //   method: 'POST',
+      //   headers: {
+      //     'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+      //     'Content-Type': 'application/json',
+      //   },
+      //   body: JSON.stringify({ ids: completedIds }),
+      // })
+
+      // 暂时使用前端模拟（等待后端API）
+      setProcessingItems(prev => prev.filter(item => item.status !== 'completed'))
+      message.success('已清理完成项（注：后端API待实现）')
+    } catch (error) {
+      console.error('清理失败:', error)
+      message.error('清理失败，请稍后重试')
+    }
   }
 
   // 获取日志状态图标
@@ -346,7 +385,7 @@ const DocumentProcessPage: React.FC = () => {
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <Title level={2}>文档处理状态</Title>
+        <Title level={2} className="documents-title">文档处理状态</Title>
         <Paragraph type="secondary">
           监控文档处理进度，查看处理日志和错误信息
         </Paragraph>
@@ -420,7 +459,7 @@ const DocumentProcessPage: React.FC = () => {
               </Badge>
               <Button
                 icon={<ReloadOutlined />}
-                onClick={() => window.location.reload()}
+                onClick={() => fetchProcessingItems()}
               >
                 手动刷新
               </Button>

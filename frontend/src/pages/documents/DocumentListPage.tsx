@@ -20,6 +20,7 @@ import {
   Tooltip,
   message,
   Popconfirm,
+  Spin,
 } from 'antd'
 import {
   SearchOutlined,
@@ -32,9 +33,14 @@ import {
   ExportOutlined,
   CalendarOutlined,
   InfoCircleOutlined,
+  FileSearchOutlined,
 } from '@ant-design/icons'
-import type { ColumnsType, TableProps } from 'antd'
+import type { TableProps } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
+
+// 引入样式
+import './Documents.css'
 
 const { Title, Text, Paragraph } = Typography
 const { Search } = Input
@@ -51,10 +57,19 @@ interface DocumentItem {
   fileSize: string
   pageCount?: number
   wordCount?: number
+  chunkCount?: number
+  vectorCount?: number
   processingProgress?: number
   errorMessage?: string
   keywords?: string[]
   summary?: string
+}
+
+interface DocumentChunkPreview {
+  chunkIndex: number
+  content: string
+  startChar?: number | null
+  endChar?: number | null
 }
 
 const DocumentListPage: React.FC = () => {
@@ -67,75 +82,88 @@ const DocumentListPage: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [detailVisible, setDetailVisible] = useState(false)
   const [selectedDocument, setSelectedDocument] = useState<DocumentItem | null>(null)
+  const [previewVisible, setPreviewVisible] = useState(false)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewDocument, setPreviewDocument] = useState<DocumentItem | null>(null)
+  const [previewChunks, setPreviewChunks] = useState<DocumentChunkPreview[]>([])
+  const [urlDocIdChecked, setUrlDocIdChecked] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string>('')
 
-  // 模拟数据
+  // 加载文档列表
   useEffect(() => {
-    const mockData: DocumentItem[] = [
-      {
-        id: '1',
-        name: '工程造价管理规范.pdf',
-        size: 2048576,
-        type: 'application/pdf',
-        status: 'completed',
-        uploadTime: '2024-01-15 10:30:00',
-        processedTime: '2024-01-15 10:32:15',
-        fileSize: '2.0 MB',
-        pageCount: 45,
-        wordCount: 12500,
-        keywords: ['工程造价', '管理', '规范', '标准'],
-        summary: '本规范详细阐述了工程造价管理的各项标准和要求，包括预算编制、成本控制、结算审核等内容。',
-      },
-      {
-        id: '2',
-        name: '建筑项目预算模板.xlsx',
-        size: 1048576,
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        status: 'processing',
-        uploadTime: '2024-01-16 14:20:00',
-        fileSize: '1.0 MB',
-        processingProgress: 75,
-      },
-      {
-        id: '3',
-        name: '施工合同范本.docx',
-        size: 524288,
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        status: 'completed',
-        uploadTime: '2024-01-17 09:15:00',
-        processedTime: '2024-01-17 09:16:30',
-        fileSize: '512 KB',
-        pageCount: 12,
-        wordCount: 3200,
-        keywords: ['施工合同', '范本', '法律', '条款'],
-        summary: '标准施工合同范本，包含合同双方权利义务、工程范围、付款方式等核心条款。',
-      },
-      {
-        id: '4',
-        name: '建筑材料价格表.txt',
-        size: 262144,
-        type: 'text/plain',
-        status: 'failed',
-        uploadTime: '2024-01-18 16:45:00',
-        fileSize: '256 KB',
-        errorMessage: '文件格式不支持或文件损坏',
-      },
-      {
-        id: '5',
-        name: '项目可行性研究报告.pdf',
-        size: 3145728,
-        type: 'application/pdf',
-        status: 'completed',
-        uploadTime: '2024-01-19 11:20:00',
-        processedTime: '2024-01-19 11:25:45',
-        fileSize: '3.0 MB',
-        pageCount: 68,
-        wordCount: 18900,
-        keywords: ['可行性研究', '项目分析', '投资评估', '风险分析'],
-        summary: '详细的项目可行性分析报告，包含市场分析、技术方案、经济效益评估、风险分析等内容。',
-      },
-    ]
-    setDocuments(mockData)
+    fetchDocuments()
   }, [])
+
+  // 检查URL参数，当文档列表加载完成后自动打开指定文档（只检查一次）
+  useEffect(() => {
+    if (documents.length > 0 && !urlDocIdChecked) {
+      const urlParams = new URLSearchParams(window.location.search)
+      const docId = urlParams.get('id')
+      if (docId) {
+        const doc = documents.find(d => d.id === docId)
+        if (doc) {
+          handlePreview(doc)
+        }
+      }
+      setUrlDocIdChecked(true)
+    }
+  }, [documents, urlDocIdChecked])
+
+  // 从API获取文档列表
+  const fetchDocuments = async () => {
+    setLoading(true)
+    try {
+      const response = await fetch('/api/v1/documents/', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`获取文档列表失败: ${response.status}`)
+      }
+
+      const data = await response.json()
+      
+      // 调试：打印第一个文档的数据
+      if (data.documents && data.documents.length > 0) {
+        console.log('第一个文档的原始数据:', data.documents[0])
+        console.log('chunk_count:', data.documents[0].chunk_count)
+        console.log('vector_count:', data.documents[0].vector_count)
+      }
+
+      // 转换后端数据格式为前端格式
+      const formattedDocs: DocumentItem[] = (data.documents || []).map((doc: any) => ({
+        id: doc.id.toString(),
+        name: doc.file_name || doc.title || '未命名文档',
+        size: doc.file_size || 0,
+        type: doc.file_type || 'unknown',
+        status: doc.status || 'completed',
+        uploadTime: doc.created_at || new Date().toISOString(),
+        processedTime: doc.processed_at,
+        fileSize: formatFileSize(doc.file_size || 0),
+        pageCount: doc.page_count,
+        wordCount: doc.word_count,
+        chunkCount: doc.chunk_count || doc.chunkCount || 0,
+        vectorCount: doc.vector_count || doc.vectorCount || 0,
+        chunk_count: doc.chunk_count || 0,
+        vector_count: doc.vector_count || 0,
+        processingProgress: doc.processing_progress,
+        errorMessage: doc.error_message,
+        keywords: doc.keywords || [],
+        summary: doc.description || doc.summary,
+      }))
+
+      setDocuments(formattedDocs)
+    } catch (error) {
+      console.error('获取文档列表失败:', error)
+      message.error('获取文档列表失败，请稍后重试')
+      setDocuments([]) // 失败时显示空列表
+    } finally {
+      setLoading(false)
+    }
+  }
 
   // 统计信息
   const stats = {
@@ -212,10 +240,91 @@ const DocumentListPage: React.FC = () => {
     setDetailVisible(true)
   }
 
+  const handlePreview = async (record: DocumentItem) => {
+    setPreviewDocument(record)
+    setPreviewVisible(true)
+    setPreviewLoading(true)
+    setPreviewChunks([])
+    setPreviewUrl('')
+    
+    // 更新URL参数
+    const url = new URL(window.location.href)
+    url.searchParams.set('id', record.id)
+    window.history.pushState({}, '', url)
+
+    try {
+      // 获取临时预览URL
+      const previewUrlResponse = await fetch(`/api/v1/documents/${record.id}/preview-url`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+        },
+      })
+      
+      if (previewUrlResponse.ok) {
+        const previewData = await previewUrlResponse.json()
+        setPreviewUrl(`${window.location.origin}${previewData.preview_url}`)
+      }
+      
+      // 获取文档chunks
+      const response = await fetch(`/api/v1/documents/${record.id}/chunks?size=100`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`获取文档分块失败: ${response.status}`)
+      }
+
+      const data = await response.json()
+      const chunks: DocumentChunkPreview[] = (data.chunks || []).map((chunk: any) => ({
+        chunkIndex: chunk.chunk_index,
+        content: chunk.content,
+        startChar: chunk.start_char,
+        endChar: chunk.end_char,
+      }))
+
+      if (chunks.length === 0) {
+        message.info('该文档暂无可预览的分块内容')
+      }
+
+      setPreviewChunks(chunks)
+    } catch (error: any) {
+      console.error('获取文档分块失败:', error)
+      message.error(error.message || '获取文档分块失败，请稍后重试')
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  const handlePreviewClose = () => {
+    setPreviewVisible(false)
+    setPreviewDocument(null)
+    setPreviewChunks([])
+  }
+
   // 删除文档
-  const handleDelete = (id: string) => {
-    setDocuments(prev => prev.filter(doc => doc.id !== id))
-    message.success('文档已删除')
+  const handleDelete = async (id: string) => {
+    try {
+      const response = await fetch(`/api/v1/documents/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+          'Content-Type': 'application/json',
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error(`删除文档失败: ${response.status}`)
+      }
+
+      setDocuments(prev => prev.filter(doc => doc.id !== id))
+      message.success('文档已删除')
+    } catch (error) {
+      console.error('删除文档失败:', error)
+      message.error('删除文档失败，请稍后重试')
+    }
   }
 
   // 批量删除
@@ -231,22 +340,41 @@ const DocumentListPage: React.FC = () => {
       okText: '确认',
       cancelText: '取消',
       okType: 'danger',
-      onOk: () => {
-        setDocuments(prev => prev.filter(doc => !selectedRowKeys.includes(doc.id)))
-        setSelectedRowKeys([])
-        message.success('批量删除成功')
+      onOk: async () => {
+        try {
+          await Promise.all(
+            selectedRowKeys.map(async (key) => {
+              const id = String(key)
+              const response = await fetch(`/api/v1/documents/${id}`, {
+                method: 'DELETE',
+                headers: {
+                  'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
+                  'Content-Type': 'application/json',
+                },
+              })
+
+              if (!response.ok) {
+                throw new Error(`删除文档失败: ${response.status}`)
+              }
+            })
+          )
+
+          setDocuments(prev => prev.filter(doc => !selectedRowKeys.includes(doc.id)))
+          setSelectedRowKeys([])
+          message.success('批量删除成功')
+        } catch (error) {
+          console.error('批量删除文档失败:', error)
+          message.error('批量删除失败，请稍后重试')
+          throw error
+        }
       },
     })
   }
 
   // 刷新列表
-  const handleRefresh = () => {
-    setLoading(true)
-    // 模拟刷新
-    setTimeout(() => {
-      setLoading(false)
-      message.success('列表已刷新')
-    }, 1000)
+  const handleRefresh = async () => {
+    await fetchDocuments()
+    message.success('列表已刷新')
   }
 
   // 导出选中项
@@ -311,6 +439,20 @@ const DocumentListPage: React.FC = () => {
       ),
     },
     {
+      title: '向量/分块',
+      key: 'vectors',
+      render: (record: any) => (
+        <Space direction="vertical" size="small">
+          <Text type={(record.vector_count || record.vectorCount) > 0 ? 'success' : 'secondary'}>
+            向量: {record.vector_count || record.vectorCount || 0}
+          </Text>
+          <Text type="secondary">
+            分块: {record.chunk_count || record.chunkCount || 0}
+          </Text>
+        </Space>
+      ),
+    },
+    {
       title: '操作',
       key: 'action',
       render: (_, record: DocumentItem) => (
@@ -320,6 +462,14 @@ const DocumentListPage: React.FC = () => {
               type="text"
               icon={<EyeOutlined />}
               onClick={() => handleViewDetail(record)}
+            />
+          </Tooltip>
+          <Tooltip title="预览分块">
+            <Button
+              type="text"
+              icon={<FileSearchOutlined />}
+              disabled={record.status !== 'completed'}
+              onClick={() => handlePreview(record)}
             />
           </Tooltip>
           <Tooltip title="下载">
@@ -357,7 +507,7 @@ const DocumentListPage: React.FC = () => {
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <Title level={2}>文档列表</Title>
+        <Title level={2} className="documents-title">文档列表</Title>
         <Paragraph type="secondary">
           管理和查看所有已上传的文档，支持搜索、筛选和批量操作
         </Paragraph>
@@ -574,6 +724,106 @@ const DocumentListPage: React.FC = () => {
           </div>
         )}
       </Drawer>
+
+      <Modal
+        title={
+          <Space>
+            <span>{previewDocument ? `文档预览 - ${previewDocument.name}` : '文档预览'}</span>
+            {previewDocument && (
+              <Button
+                type="primary"
+                icon={<DownloadOutlined />}
+                size="small"
+                onClick={async () => {
+                  try {
+                    const response = await fetch(`/api/v1/documents/${previewDocument.id}/download`, {
+                      headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('accessToken')}`
+                      }
+                    })
+                    if (response.ok) {
+                      const blob = await response.blob()
+                      const url = window.URL.createObjectURL(blob)
+                      const a = document.createElement('a')
+                      a.href = url
+                      a.download = previewDocument.name
+                      a.click()
+                      window.URL.revokeObjectURL(url)
+                      message.success('下载成功')
+                    } else {
+                      message.error('下载失败')
+                    }
+                  } catch (error) {
+                    message.error('下载失败')
+                  }
+                }}
+              >
+                下载原文件
+              </Button>
+            )}
+          </Space>
+        }
+        open={previewVisible}
+        onCancel={handlePreviewClose}
+        footer={null}
+        width={1200}
+        style={{ top: 20 }}
+      >
+        {previewDocument && (
+          <div>
+            {/* Office文件在线预览 */}
+            {['pptx', 'ppt', 'docx', 'doc', 'xlsx', 'xls'].includes(previewDocument.type?.toLowerCase() || '') && previewUrl ? (
+              <div style={{ marginBottom: 16 }}>
+                <iframe
+                  src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(previewUrl)}`}
+                  width="100%"
+                  height="600px"
+                  frameBorder="0"
+                  style={{ border: '1px solid #d9d9d9', borderRadius: 4 }}
+                  title="文档预览"
+                />
+                <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>
+                  提示：如果预览失败，请点击上方"下载原文件"按钮下载后查看
+                </Text>
+              </div>
+            ) : null}
+            
+            {/* 文本内容预览 */}
+            <Divider>文档内容</Divider>
+            <Spin spinning={previewLoading}>
+              {previewChunks.length > 0 ? (
+                <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                  {previewChunks.map((chunk) => (
+                    <div
+                      key={chunk.chunkIndex}
+                      style={{
+                        padding: '12px 16px',
+                        marginBottom: 12,
+                        background: '#f5f7fa',
+                        borderRadius: 8,
+                      }}
+                    >
+                      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                        <Text strong>分块 #{chunk.chunkIndex + 1}</Text>
+                        <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+                          {chunk.content}
+                        </Paragraph>
+                        {(typeof chunk.startChar === 'number' || typeof chunk.endChar === 'number') && (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            位置: {chunk.startChar ?? '-'} - {chunk.endChar ?? '-'}
+                          </Text>
+                        )}
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                !previewLoading && <Empty description="暂无分块内容" />
+              )}
+            </Spin>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

@@ -1,9 +1,10 @@
 """
 用户数据模型
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, JSON, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from datetime import datetime
 
 from app.db.session import Base
 
@@ -31,7 +32,7 @@ class User(Base):
     default_llm_model = Column(String(100), nullable=True)
 
     # 时间戳
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_login_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -43,14 +44,22 @@ class User(Base):
     # 备注
     notes = Column(Text, nullable=True)
 
-    # 关系
+    # 关系 - 修复外键歧义问题
     projects = relationship("Project", back_populates="owner", cascade="all, delete-orphan")
-    estimates = relationship("CostEstimate", back_populates="created_by_user", cascade="all, delete-orphan")
+    # 创建的成本估算（作为创建者）
+    created_estimates = relationship("CostEstimate", foreign_keys="CostEstimate.created_by", back_populates="created_by_user", cascade="all, delete-orphan")
+    # 审批的成本估算（作为审批者）
+    approved_estimates = relationship("CostEstimate", foreign_keys="CostEstimate.approved_by", back_populates="approver")
     documents = relationship("Document", back_populates="uploaded_by_user", cascade="all, delete-orphan")
     query_histories = relationship("QueryHistory", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        if self.created_at is None:
+            self.created_at = datetime.utcnow()
 
     @property
     def is_locked(self) -> bool:
@@ -75,3 +84,9 @@ class User(Base):
         if not self.preferences:
             self.preferences = {}
         self.preferences[key] = value
+
+    # 为了向后兼容，提供estimates属性
+    @property
+    def estimates(self):
+        """获取用户创建的成本估算"""
+        return self.created_estimates

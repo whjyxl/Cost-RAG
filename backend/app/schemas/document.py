@@ -69,19 +69,29 @@ class DocumentProcessingStatus(BaseModel):
 class Document(DocumentBase):
     """文档完整模式"""
     id: int = Field(..., description="文档ID")
-    user_id: int = Field(..., description="用户ID")
+    user_id: int = Field(..., alias='uploaded_by', description="用户ID")
+    file_name: str = Field(..., description="文件名")
     file_hash: str = Field(..., description="文件哈希")
     file_path: str = Field(..., description="文件路径")
-    metadata: Optional[Dict[str, Any]] = Field(None, description="文档元数据")
-    processing_status: DocumentProcessingStatus = Field(..., description="处理状态")
-    total_length: Optional[int] = Field(None, description="总字符数")
+    file_size: float = Field(..., description="文件大小(字节)")
+    file_extension: str = Field(..., description="文件扩展名")
+    mime_type: str = Field(..., description="MIME类型")
+    metadata: Optional[Dict[str, Any]] = Field(None, alias='doc_metadata', description="文档元数据")
+    processing_status: Optional[str] = Field(None, alias='status', description="处理状态")
+    processing_progress: Optional[float] = Field(None, description="处理进度")
+    error_message: Optional[str] = Field(None, description="错误消息")
+    word_count: Optional[int] = Field(None, description="字数")
+    total_length: Optional[int] = Field(None, alias='char_count', description="总字符数")
     chunk_count: Optional[int] = Field(None, description="分块数量")
+    vector_count: Optional[int] = Field(None, description="向量数量")
     is_active: bool = Field(True, description="是否活跃")
     created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
+    updated_at: Optional[datetime] = Field(None, description="更新时间")
+    processed_at: Optional[datetime] = Field(None, description="处理完成时间")
 
     class Config:
         from_attributes = True
+        populate_by_name = True  # 允许使用原字段名或别名
 
 
 class DocumentSummary(BaseModel):
@@ -90,16 +100,21 @@ class DocumentSummary(BaseModel):
     title: str
     description: Optional[str]
     category: Optional[str]
-    tags: List[str]
-    file_type: str
-    file_size: int
-    processing_status: str
-    chunk_count: Optional[int]
+    tags: Optional[List[str]] = []
+    file_name: str
+    file_type: str = Field(..., alias='file_extension')
+    file_size: float
+    mime_type: str
+    processing_status: str = Field(..., alias='status')
+    processing_progress: Optional[float] = None
+    chunk_count: Optional[int] = None
+    vector_count: Optional[int] = None
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 class DocumentList(BaseModel):

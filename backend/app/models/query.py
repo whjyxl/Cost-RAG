@@ -1,7 +1,7 @@
 """
 查询历史和结果数据模型
 """
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, JSON, Boolean, ForeignKey, ARRAY
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, JSON, Boolean, ForeignKey
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 
@@ -25,7 +25,7 @@ class QueryHistory(Base):
     query_category = Column(String(100), nullable=True)  # 查询分类
 
     # 查询参数
-    data_sources = Column(ARRAY(String), nullable=True)  # 使用的數據源
+    data_sources = Column(JSON, nullable=True)  # 使用的數據源（JSON数组，兼容SQLite和PostgreSQL）
     filters = Column(JSON, nullable=True)  # 筛选条件
     parameters = Column(JSON, nullable=True)  # 查询參數
     context = Column(JSON, nullable=True)  # 上下文信息
@@ -105,9 +105,9 @@ class QueryResult(Base):
     score = Column(Float, nullable=True)  # 综合评分
 
     # 元数据
-    metadata = Column(JSON, nullable=True)  # 源特定元数据
-    tags = Column(ARRAY(String), nullable=True)  # 标签
-    categories = Column(ARRAY(String), nullable=True)  # 分类
+    result_metadata = Column("metadata", JSON, nullable=True)  # 源特定元数据
+    tags = Column(JSON, nullable=True)  # 标签（JSON数组，兼容SQLite和PostgreSQL）
+    categories = Column(JSON, nullable=True)  # 分类（JSON数组，兼容SQLite和PostgreSQL）
 
     # 链接信息
     url = Column(String(1000), nullable=True)  # 原始链接
@@ -186,7 +186,7 @@ class UserFeedback(Base):
     correction_text = Column(Text, nullable=True)  # 纠正文本
 
     # 元数据
-    metadata = Column(JSON, nullable=True)  # 额外元数据
+    feedback_metadata = Column("metadata", JSON, nullable=True)  # 额外元数据
     device_info = Column(JSON, nullable=True)  # 设备信息
 
     # 状态

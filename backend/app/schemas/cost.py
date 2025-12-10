@@ -199,7 +199,7 @@ class CostAnalysisRequest(BaseModel):
 
 class CostComparisonRequest(BaseModel):
     """成本比较请求模式"""
-    estimate_ids: List[int] = Field(..., min_items=2, max_items=10, description="要比较的估算ID列表")
+    estimate_ids: List[int] = Field(..., min_items=1, max_items=10, description="要比较的估算ID列表")
     comparison_metrics: Optional[List[str]] = Field(
         default=["budget", "confidence", "method", "categories"],
         description="比较指标"
@@ -209,7 +209,7 @@ class CostComparisonRequest(BaseModel):
 class CostPredictionRequest(BaseModel):
     """成本预测请求模式"""
     project_type: str = Field(..., description="项目类型")
-    estimated_budget: float = Field(..., gt=0, description="估算预算")
+    estimated_budget: Optional[float] = Field(None, gt=0, description="估算预算")
     estimated_duration_days: Optional[int] = Field(None, gt=0, description="估算工期")
     complexity_level: Optional[ComplexityLevel] = Field(None, description="复杂度等级")
     team_size: Optional[int] = Field(None, gt=0, description="团队规模")

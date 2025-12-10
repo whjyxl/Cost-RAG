@@ -1,0 +1,485 @@
+/**
+ * Dashboard 页面改造后的样式
+ * 主要改进：
+ * 1. 使用 CSS 变量管理颜色和动画
+ * 2. 添加现代化的过渡和动画效果
+ * 3. 优化响应式布局
+ * 4. 增强视觉层次
+ */
+
+/* ============================================================
+   CSS 变量定义
+   ============================================================ */
+
+:root {
+  /* 色彩 */
+  --color-primary-600: #2563eb;
+  --color-primary-700: #1d4ed8;
+  --color-success-500: #10b981;
+  --color-warning-500: #f59e0b;
+  --color-error-500: #ef4444;
+  --color-neutral-50: #f9fafb;
+  --color-neutral-100: #f3f4f6;
+  --color-neutral-200: #e5e7eb;
+  --color-neutral-300: #d1d5db;
+  --color-neutral-600: #4b5563;
+  --color-neutral-700: #374151;
+  --color-neutral-800: #1f2937;
+
+  /* 排版 */
+  --font-family-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-sm: 13px;
+  --line-height-base: 1.57;
+
+  /* 间距 */
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-6: 24px;
+
+  /* 圆角 */
+  --border-radius-md: 6px;
+  --border-radius-lg: 8px;
+
+  /* 阴影 */
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+  --shadow-hover: 0 10px 30px 0 rgba(0, 0, 0, 0.12);
+
+  /* 过渡 */
+  --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ============================================================
+   暗黑模式变量
+   ============================================================ */
+
+[data-theme='dark'] {
+  --color-neutral-50: #111827;
+  --color-neutral-100: #1f2937;
+  --color-neutral-200: #374151;
+  --color-neutral-800: #f3f4f6;
+}
+
+/* ============================================================
+   主容器
+   ============================================================ */
+
+.dashboard-container {
+  padding: 24px;
+  background-color: var(--color-neutral-50);
+  animation: fadeInUp 0.5s ease-out;
+}
+
+@media (max-width: 768px) {
+  .dashboard-container {
+    padding: 16px;
+  }
+}
+
+/* ============================================================
+   页面头部
+   ============================================================ */
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-neutral-200);
+  animation: slideDownFade 0.4s ease-out;
+}
+
+.dashboard-header h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--color-neutral-800);
+}
+
+@media (max-width: 768px) {
+  .dashboard-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .dashboard-header h2 {
+    font-size: 20px;
+  }
+}
+
+/* ============================================================
+   统计卡片
+   ============================================================ */
+
+.statistics-row {
+  animation: staggerIn 0.6s ease-out;
+}
+
+/* 使用 stagger 动画延迟每个卡片的进入 */
+.statistics-row > .ant-col {
+  animation: slideUpFade 0.5s ease-out backwards;
+}
+
+.statistics-row > .ant-col:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.statistics-row > .ant-col:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.statistics-row > .ant-col:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+.statistics-row > .ant-col:nth-child(4) {
+  animation-delay: 0.3s;
+}
+
+/* ============================================================
+   新闻卡片容器
+   ============================================================ */
+
+.news-card-container {
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: slideLeftFade 0.5s ease-out 0.2s backwards;
+}
+
+.news-card-container .ant-card-head {
+  border-bottom: 2px solid var(--color-primary-600);
+  padding: 16px;
+}
+
+.news-card-container .ant-card-body {
+  padding: 0;
+}
+
+.news-card-container .ant-list {
+  padding: 0;
+}
+
+/* ============================================================
+   新闻项样式改进
+   ============================================================ */
+
+.news-item-improved {
+  position: relative;
+  overflow: hidden;
+}
+
+.news-item-improved::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, currentColor, transparent);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.news-item-improved:hover::before {
+  opacity: 0.1;
+}
+
+/* 分类标签美化 */
+.news-item-improved .ant-tag {
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ============================================================
+   价格面板
+   ============================================================ */
+
+.price-panel {
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: slideRightFade 0.5s ease-out 0.2s backwards;
+  height: 100%;
+}
+
+.price-panel .ant-card-head {
+  border-bottom: 2px solid var(--color-warning-500);
+  padding: 16px;
+}
+
+.price-panel .ant-card-body {
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+/* 价格项悬停效果 */
+.price-panel > div > div {
+  transition: var(--transition-fast);
+}
+
+/* ============================================================
+   趋势图表容器
+   ============================================================ */
+
+.trend-chart-container {
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-md);
+  animation: slideUpFade 0.5s ease-out 0.3s backwards;
+}
+
+.trend-chart-container .ant-card-head {
+  border-bottom: 2px solid var(--color-success-500);
+  padding: 16px;
+}
+
+/* 图表响应式 */
+.trend-chart-container .recharts-wrapper {
+  animation: fadeIn 0.4s ease-out 0.5s backwards;
+}
+
+/* ============================================================
+   动画定义
+   ============================================================ */
+
+/* 淡入 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 淡入向上 */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 向上淡入 */
+@keyframes slideUpFade {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 向下淡入 */
+@keyframes slideDownFade {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 向左淡入 */
+@keyframes slideLeftFade {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 向右淡入 */
+@keyframes slideRightFade {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 错落进入 */
+@keyframes staggerIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ============================================================
+   微交互 - 按钮悬停效果
+   ============================================================ */
+
+.ant-btn {
+  transition: var(--transition-normal);
+}
+
+.ant-btn:hover {
+  transform: translateY(-2px);
+}
+
+.ant-btn-primary:hover {
+  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.15);
+}
+
+/* ============================================================
+   响应式适配
+   ============================================================ */
+
+@media (max-width: 1024px) {
+  .dashboard-container {
+    padding: 16px;
+  }
+
+  .statistics-row {
+    gap: 12px !important;
+  }
+
+  .statistics-row > .ant-col {
+    flex: 0 0 calc(50% - 6px) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-container {
+    padding: 12px;
+  }
+
+  .statistics-row > .ant-col {
+    flex: 0 0 100% !important;
+    animation-delay: 0s !important;
+  }
+
+  .news-card-container,
+  .price-panel,
+  .trend-chart-container {
+    animation-delay: 0s !important;
+  }
+
+  .news-item-improved {
+    padding: 12px !important;
+    margin-bottom: 8px !important;
+  }
+
+  /* 移动端隐藏某些列 */
+  .dashboard-header {
+    gap: 8px;
+  }
+}
+
+/* ============================================================
+   深色模式适配
+   ============================================================ */
+
+[data-theme='dark'] .dashboard-container {
+  background-color: var(--color-neutral-100);
+}
+
+[data-theme='dark'] .dashboard-header {
+  border-bottom-color: var(--color-neutral-200);
+}
+
+[data-theme='dark'] .statistics-card {
+  background: rgba(37, 99, 235, 0.08) !important;
+  border-color: rgba(37, 99, 235, 0.2) !important;
+}
+
+[data-theme='dark'] .news-item-improved {
+  background-color: var(--color-neutral-100) !important;
+  border-color: var(--color-neutral-200) !important;
+}
+
+/* ============================================================
+   打印样式
+   ============================================================ */
+
+@media print {
+  .dashboard-header {
+    border-bottom: 2px solid #000;
+  }
+
+  .ant-btn,
+  .ant-card-head {
+    display: none;
+  }
+
+  .statistics-row,
+  .news-card-container,
+  .price-panel,
+  .trend-chart-container {
+    page-break-inside: avoid;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* ============================================================
+   可访问性改进
+   ============================================================ */
+
+/* 焦点状态 */
+.statistics-card:focus-within,
+.news-item-improved:focus-within {
+  outline: 2px solid var(--color-primary-600);
+  outline-offset: 2px;
+}
+
+/* 运动偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .dashboard-container,
+  .statistics-row,
+  .news-card-container,
+  .price-panel,
+  .trend-chart-container {
+    animation: none;
+  }
+}
+
+/* ============================================================
+   性能优化
+   ============================================================ */
+
+.dashboard-container {
+  will-change: auto;
+}
+
+.statistics-row > .ant-col {
+  will-change: transform;
+}
+
+.news-item-improved:hover,
+.price-panel > div > div:hover {
+  will-change: transform, box-shadow;
+}

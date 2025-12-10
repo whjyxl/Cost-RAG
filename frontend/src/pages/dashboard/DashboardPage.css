@@ -1,394 +1,337 @@
-/* 仪表板页面样式 */
-.dashboard-page {
-  animation: fadeIn 0.5s ease-in-out;
+/* ============================================
+   现代化仪表板页面样式
+   ============================================ */
+
+.dashboard-modern {
+  padding: 32px;
+  min-height: calc(100vh - 64px);
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  position: relative;
+  overflow: hidden;
 }
 
+/* 页面头部 */
 .dashboard-header {
-  margin-bottom: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 32px;
+  animation: fadeIn 0.6s ease-out;
 }
 
-.page-title {
-  margin-bottom: 8px !important;
-  color: #1f2937;
-  font-weight: 700;
+.refresh-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+  transition: all 0.3s;
 }
 
-.page-description {
-  color: #6b7280;
-  font-size: 16px;
-  margin-bottom: 0 !important;
+.refresh-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+  color: white;
 }
 
-/* 统计卡片样式 */
-.stats-row .stat-card {
+/* 统计卡片部分 */
+.stats-section {
+  margin-bottom: 32px;
+}
+
+.glass-stat-card {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  transition: all 0.3s;
+  cursor: pointer;
+}
+
+.glass-stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 40px rgba(102, 126, 234, 0.18);
+}
+
+.stat-icon {
+  font-size: 24px;
+  margin-right: 8px;
+}
+
+/* 主内容区 */
+.content-section {
+  animation: fadeIn 0.8s ease-out;
+}
+
+/* 玻璃卡片 */
+.glass-card {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(102, 126, 234, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  transition: all 0.3s;
+}
+
+.glass-card:hover {
+  box-shadow: 0 12px 40px rgba(102, 126, 234, 0.2);
+}
+
+.glass-card .ant-card-head {
+  border-bottom: 1px solid rgba(102, 126, 234, 0.1);
+}
+
+.glass-card .ant-card-head-title {
+  font-weight: 600;
+  font-size: 18px;
+}
+
+/* 新闻卡片 */
+.news-card {
+  min-height: 700px;
+}
+
+.news-item {
+  padding: 20px 0;
+  border-bottom: 1px solid rgba(102, 126, 234, 0.08);
+  transition: all 0.3s;
+}
+
+.news-item:hover {
+  background: rgba(102, 126, 234, 0.02);
+  transform: translateX(4px);
+}
+
+.news-item-content {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+}
+
+.news-icon {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
   border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  border: 1px solid #f3f4f6;
-  transition: all 0.3s ease;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  font-size: 20px;
+  flex-shrink: 0;
+  line-height: 40px;
   text-align: center;
 }
 
-.stats-row .stat-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+.news-details {
+  flex: 1;
 }
 
-.stats-row .ant-statistic-title {
-  color: #6b7280;
-  font-weight: 500;
-  font-size: 14px;
-  margin-bottom: 8px;
+.news-title {
+  margin-bottom: 8px !important;
+  font-size: 16px !important;
+  font-weight: 600 !important;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
-.stats-row .ant-statistic-content {
-  font-size: 32px;
-  font-weight: 700;
+.news-title span {
+  flex: 1;
 }
 
-.stats-row .ant-statistic-content-prefix {
-  margin-right: 8px;
-  font-size: 24px;
+.news-summary {
+  color: #6c757d;
+  margin-bottom: 12px !important;
+  line-height: 1.6;
 }
 
-/* 健康状态卡片 */
-.health-card .health-metrics {
+.news-meta {
+  color: #6c757d;
+  font-size: 13px;
+}
+
+.news-meta .separator {
+  margin: 0 8px;
+  color: #d1d5db;
+}
+
+.meta-tag {
+  font-size: 12px;
+  border: none;
+  background: rgba(102, 126, 234, 0.1);
+  color: #667eea;
+}
+
+.tag-important {
+  background: linear-gradient(135deg, #f093fb 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  font-weight: 600;
+}
+
+.news-stats {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.news-stats .anticon {
+  font-size: 18px;
+  color: #667eea;
+}
+
+/* 价格卡片 */
+.price-card {
+  min-height: 700px;
+}
+
+.price-list {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.health-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.price-item {
+  padding: 20px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+  border: 1px solid rgba(102, 126, 234, 0.1);
+  transition: all 0.3s;
 }
 
-.metric-header {
+.price-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+  border-color: rgba(102, 126, 234, 0.2);
+}
+
+.price-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
 }
 
-.metric-value {
+.material-name {
+  display: block;
+  font-size: 16px;
   font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 4px;
+}
+
+.material-spec {
+  display: block;
+  font-size: 13px;
+  color: #6c757d;
+}
+
+.price-value {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.current-price {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.price-currency {
+  font-size: 24px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.price-unit {
   font-size: 14px;
+  color: #6c757d;
 }
 
-/* 活动卡片 */
-.activity-card .activity-item {
-  padding: 12px 0;
-  border-bottom: 1px solid #f3f4f6;
-}
-
-.activity-card .activity-item:last-child {
-  border-bottom: none;
-}
-
-.activity-title {
-  font-size: 14px;
-  color: #374151;
-  font-weight: 500;
-}
-
-.activity-meta {
+.price-change {
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #9ca3af;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 12px;
+}
+
+.price-change.up {
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.price-change.down {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.price-change.stable {
+  color: #6c757d;
+  background: rgba(108, 117, 125, 0.1);
+}
+
+.market-name {
   font-size: 12px;
 }
 
-/* 快速操作卡片 */
-.quick-actions-card .quick-action-btn {
-  width: 100%;
-  height: 48px;
-  border-radius: 8px;
-  font-weight: 500;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  transition: all 0.3s ease;
-}
-
-.quick-actions-card .quick-action-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-/* 使用统计卡片 */
-.usage-stats-card .usage-stat {
-  padding: 16px;
-  background: #f8fafc;
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
-}
-
-.usage-stat-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.usage-stat-header .anticon {
-  font-size: 16px;
-}
-
-.usage-stat-value {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.usage-stat-value .anticon {
-  font-size: 12px;
-}
-
-/* 通知卡片 */
-.notifications-card .notification-item {
-  padding: 12px 0;
-  border-bottom: 1px solid #f3f4f6;
-}
-
-.notifications-card .notification-item:last-child {
-  border-bottom: none;
+.price-footer {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(102, 126, 234, 0.1);
+  text-align: center;
 }
 
 /* 响应式设计 */
-@media (max-width: 768px) {
+@media (max-width: 992px) {
+  .dashboard-modern {
+    padding: 16px;
+  }
+
   .dashboard-header {
-    margin-bottom: 20px;
-  }
-
-  .page-title {
-    font-size: 24px !important;
-  }
-
-  .page-description {
-    font-size: 14px !important;
-  }
-
-  .stats-row .stat-card {
-    margin-bottom: 16px;
-  }
-
-  .stats-row .ant-statistic-content {
-    font-size: 28px;
-  }
-
-  .health-card .health-metrics {
-    gap: 12px;
-  }
-
-  .quick-actions-card .quick-action-btn {
-    height: 44px;
-    font-size: 14px;
-  }
-
-  .usage-stats-card .usage-stat {
-    padding: 12px;
-  }
-
-  .usage-stat-value {
     flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
+    gap: 16px;
+  }
+
+  .news-item-content {
+    flex-direction: column;
+  }
+
+  .news-stats {
+    align-self: flex-start;
+  }
+
+  .price-item {
+    padding: 16px;
+  }
+
+  .current-price {
+    flex-direction: column;
+    align-items: flex-end;
   }
 }
 
 @media (max-width: 576px) {
-  .page-title {
-    font-size: 22px !important;
+  .price-header {
+    flex-direction: column;
+    gap: 12px;
   }
 
-  .page-description {
-    font-size: 13px !important;
+  .price-value {
+    align-items: flex-start;
   }
 
-  .stats-row .ant-statistic-content {
-    font-size: 24px;
+  .current-price {
+    align-items: flex-start;
   }
-
-  .stats-row .ant-statistic-content-prefix {
-    font-size: 20px;
-  }
-
-  .quick-actions-card .quick-action-btn {
-    height: 40px;
-    font-size: 13px;
-  }
-}
-
-/* 暗黑模式 */
-.dark .dashboard-page {
-  background: #0f172a;
-}
-
-.dark .page-title {
-  color: #f3f4f6;
-}
-
-.dark .page-description {
-  color: #9ca3af;
-}
-
-.dark .stats-row .stat-card {
-  background: #1e293b;
-  border-color: #374151;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.dark .stats-row .stat-card:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-}
-
-.dark .stats-row .ant-statistic-title {
-  color: #9ca3af;
-}
-
-.dark .health-card .health-metric {
-  color: #d1d5db;
-}
-
-.dark .activity-card .activity-item {
-  border-bottom-color: #374151;
-}
-
-.dark .activity-title {
-  color: #d1d5db;
-}
-
-.dark .activity-meta {
-  color: #6b7280;
-}
-
-.dark .quick-actions-card .usage-stat {
-  background: #374151;
-  border-color: #4b5563;
-}
-
-.dark .usage-stats-card .usage-stat-header {
-  color: #d1d5db;
-}
-
-.dark .notifications-card .notification-item {
-  border-bottom-color: #374151;
-}
-
-/* 动画效果 */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes slideInUp {
-  from {
-    opacity: 0;
-    transform: translateY(30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes slideInLeft {
-  from {
-    opacity: 0;
-    transform: translateX(-30px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.stats-row .stat-card:nth-child(1) {
-  animation: slideInUp 0.6s ease-out 0.1s both;
-}
-
-.stats-row .stat-card:nth-child(2) {
-  animation: slideInUp 0.6s ease-out 0.2s both;
-}
-
-.stats-row .stat-card:nth-child(3) {
-  animation: slideInUp 0.6s ease-out 0.3s both;
-}
-
-.stats-row .stat-card:nth-child(4) {
-  animation: slideInUp 0.6s ease-out 0.4s both;
-}
-
-.health-card,
-.activity-card {
-  animation: slideInLeft 0.6s ease-out 0.5s both;
-}
-
-.quick-actions-card {
-  animation: slideInUp 0.6s ease-out 0.6s both;
-}
-
-.usage-stats-card {
-  animation: slideInLeft 0.6s ease-out 0.7s both;
-}
-
-.notifications-card {
-  animation: slideInUp 0.6s ease-out 0.8s both;
-}
-
-/* 卡片通用样式增强 */
-.ant-card {
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  transition: all 0.3s ease;
-}
-
-.ant-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-}
-
-.ant-card-head {
-  border-bottom: 1px solid #f3f4f6;
-  padding: 20px 24px;
-}
-
-.ant-card-head-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f2937;
-}
-
-.ant-card-body {
-  padding: 24px;
-}
-
-.dark .ant-card {
-  background: #1e293b;
-  border-color: #374151;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-.dark .ant-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-}
-
-.dark .ant-card-head {
-  background: #1e293b;
-  border-bottom-color: #374151;
-}
-
-.dark .ant-card-head-title {
-  color: #f3f4f6;
-}
-
-.dark .ant-card-body {
-  background: #1e293b;
 }

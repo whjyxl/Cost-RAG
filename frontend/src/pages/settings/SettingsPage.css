@@ -1,0 +1,288 @@
+/* ========================================
+   系统设置页面 - 简洁设计
+   ======================================== */
+
+.settings-modern {
+  min-height: calc(100vh - 64px);
+  background: #f5f7fa;
+  padding: 24px;
+}
+
+/* 页面标题 */
+.settings-title {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 20px;
+}
+
+/* 设置布局 */
+.settings-layout {
+  display: flex;
+  gap: 20px;
+}
+
+/* 左侧菜单 */
+.settings-menu {
+  width: 220px;
+  flex-shrink: 0;
+}
+
+.settings-menu-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  padding: 8px;
+}
+
+.settings-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 4px;
+  color: #2c3e50;
+  font-size: 14px;
+}
+
+.settings-menu-item:hover {
+  background: rgba(102, 126, 234, 0.08);
+}
+
+.settings-menu-item.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.settings-menu-icon {
+  margin-right: 10px;
+  font-size: 16px;
+}
+
+/* 右侧内容区 */
+.settings-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-content-card {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  padding: 24px;
+}
+
+/* 设置项卡片 */
+.settings-section {
+  margin-bottom: 24px;
+}
+
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+}
+
+.settings-section-icon {
+  margin-right: 8px;
+  color: #667eea;
+}
+
+.settings-section-content {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+/* 设置项 */
+.settings-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.settings-item:last-child {
+  border-bottom: none;
+}
+
+.settings-item-label {
+  flex: 1;
+  margin-right: 20px;
+}
+
+.settings-item-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: #2c3e50;
+  margin-bottom: 4px;
+}
+
+.settings-item-desc {
+  font-size: 12px;
+  color: #999;
+}
+
+.settings-item-control {
+  flex-shrink: 0;
+}
+
+/* 表单控件 */
+.settings-input {
+  background: white;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  padding: 8px 12px;
+  transition: all 0.3s;
+  font-size: 14px;
+}
+
+.settings-input:hover {
+  border-color: #667eea;
+}
+
+.settings-input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+/* 保存按钮 */
+.settings-save-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  color: white;
+  padding: 8px 24px;
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-save-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.settings-save-btn:active {
+  transform: translateY(0);
+}
+
+.settings-save-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* 次要按钮 */
+.settings-secondary-btn {
+  background: white;
+  border: 1px solid #d9d9d9;
+  color: #667eea;
+  padding: 6px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.settings-secondary-btn:hover {
+  border-color: #667eea;
+  background: rgba(102, 126, 234, 0.05);
+}
+
+/* 统计卡片 */
+.settings-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.settings-stat-card {
+  background: white;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #e8e8e8;
+  transition: all 0.3s;
+}
+
+.settings-stat-card:hover {
+  border-color: #667eea;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+}
+
+.settings-stat-label {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 8px;
+}
+
+.settings-stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.settings-stat-unit {
+  font-size: 12px;
+  color: #666;
+  margin-left: 4px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .settings-modern {
+    padding: 16px;
+  }
+
+  .settings-layout {
+    flex-direction: column;
+  }
+
+  .settings-menu {
+    width: 100%;
+  }
+
+  .settings-menu-card {
+    display: flex;
+    overflow-x: auto;
+    padding: 6px;
+  }
+
+  .settings-menu-item {
+    white-space: nowrap;
+    margin-right: 8px;
+    margin-bottom: 0;
+  }
+
+  .settings-content-card {
+    padding: 16px;
+  }
+
+  .settings-stats {
+    grid-template-columns: 1fr 1fr;
+  }
+}

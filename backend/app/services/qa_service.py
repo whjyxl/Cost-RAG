@@ -6,9 +6,12 @@ import asyncio
 import time
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, TYPE_CHECKING
 import logging
 import json
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.qa import (
     QueryRequest, QueryResponse, RetrievalResult, AnswerGenerationRequest,
@@ -51,12 +54,13 @@ class QAService:
             QueryType.EQUIPMENT: self._handle_equipment_query
         }
 
-    async def process_query(self, query_request: QueryRequest) -> QueryResponse:
+    async def process_query(self, query_request: QueryRequest, db: Optional['AsyncSession'] = None) -> QueryResponse:
         """
         处理查询请求
 
         Args:
             query_request: 查询请求
+            db: 数据库会话（可选）
 
         Returns:
             查询响应
@@ -71,7 +75,7 @@ class QAService:
             processed_query = await self._preprocess_query(query_request)
 
             # 2. 多源检索
-            retrieval_result = await self._multi_source_retrieval(processed_query)
+            retrieval_result = await self._multi_source_retrieval(processed_query, db)
 
             # 3. 答案生成
             answer = await self._generate_answer(processed_query, retrieval_result)
@@ -123,12 +127,13 @@ class QAService:
                 session_id=query_request.session_id
             )
 
-    async def batch_process_queries(self, batch_request) -> Dict[str, Any]:
+    async def batch_process_queries(self, batch_request, db: Optional['AsyncSession'] = None) -> Dict[str, Any]:
         """
         批量处理查询
 
         Args:
             batch_request: 批量查询请求
+            db: 数据库会话（可选）
 
         Returns:
             批量查询响应
@@ -147,7 +152,7 @@ class QAService:
         async def process_single_query(query_request):
             async with semaphore:
                 try:
-                    response = await self.process_query(query_request)
+                    response = await self.process_query(query_request, db)
                     return response
                 except Exception as e:
                     error_msg = f"查询失败: {str(e)}"
@@ -211,12 +216,13 @@ class QAService:
 
         return query_request
 
-    async def _multi_source_retrieval(self, query_request: QueryRequest) -> RetrievalResult:
+    async def _multi_source_retrieval(self, query_request: QueryRequest, db: Optional['AsyncSession'] = None) -> RetrievalResult:
         """
         多源检索
 
         Args:
             query_request: 查询请求
+            db: 数据库会话（可选）
 
         Returns:
             检索结果
@@ -226,7 +232,7 @@ class QAService:
 
         # 根据查询类型和数据源配置决定检索策略
         if DataSource.DOCUMENTS in query_request.include_sources:
-            retrieval_tasks.append(self._retrieve_documents(query_request))
+            retrieval_tasks.append(self._retrieve_documents(query_request, db))
 
         if DataSource.KNOWLEDGE_GRAPH in query_request.include_sources:
             retrieval_tasks.append(self._retrieve_knowledge(query_request))
@@ -259,6 +265,13 @@ class QAService:
 
         processing_time = time.time() - start_time
 
+        # 详细日志记录多源检索结果
+        logger.info(
+            f"多源检索完成: 查询='{query_request.question[:50]}...', "
+            f"总结果={total_retrieved} (文档={len(documents)}, 知识图谱={len(knowledge)}, 成本数据={len(cost_data)}), "
+            f"耗时={processing_time:.2f}s"
+        )
+
         return RetrievalResult(
             query=query_request.question,
             documents=documents,
@@ -269,79 +282,190 @@ class QAService:
             retrieval_method="multi_source_fusion"
         )
 
-    async def _retrieve_documents(self, query_request: QueryRequest) -> List[RetrievedDocument]:
+    async def _retrieve_documents(self, query_request: QueryRequest, db: Optional['AsyncSession'] = None) -> List[RetrievedDocument]:
         """
         检索文档
 
         Args:
             query_request: 查询请求
+            db: 数据库会话（可选）
 
         Returns:
             检索到的文档列表
         """
         try:
-            # 调用文档服务进行检索
-            search_results = await self.document_service.search_documents(
+            # 如果没有数据库会话或用户ID，返回空列表
+            if not db or not query_request.user_id:
+                logger.warning("文档检索需要数据库会话和用户ID")
+                return []
+
+            # 使用向量搜索
+            from app.schemas.document import VectorSearchRequest
+
+            # 构建向量搜索请求
+            vector_search_request = VectorSearchRequest(
                 query=query_request.question,
-                max_results=query_request.max_results,
-                filters=query_request.filters
+                limit=query_request.max_results or 10,
+                score_threshold=query_request.similarity_threshold,  # 使用请求中的阈值
+                filters=query_request.filters or {}
             )
 
+            # 调用文档服务的向量搜索方法
+            vector_results = await self.document_service.vector_search(
+                search_request=vector_search_request,
+                user_id=query_request.user_id,
+                db=db
+            )
+
+            # 转换结果格式
             documents = []
-            for result in search_results.get("results", []):
+            for result in vector_results:
                 doc = RetrievedDocument(
-                    document_id=result.get("id", 0),
-                    title=result.get("title", ""),
-                    content=result.get("content", ""),
-                    file_path=result.get("file_path", ""),
-                    file_type=result.get("file_type", ""),
-                    relevance_score=result.get("score", 0.0),
-                    chunks=result.get("chunks", []),
-                    metadata=result.get("metadata", {})
+                    document_id=result.get('document_id', 0),
+                    title=result.get('metadata', {}).get('title', ''),
+                    content=result.get('content', ''),
+                    file_path='',  # 向量搜索结果中可能没有文件路径
+                    file_type=result.get('metadata', {}).get('file_type', ''),
+                    relevance_score=result.get('relevance_score', 0.0),
+                    chunks=[{
+                        'chunk_index': result.get('chunk_index', 0),
+                        'content': result.get('content', '')
+                    }],
+                    metadata=result.get('metadata', {})
                 )
                 documents.append(doc)
 
+            if documents:
+                logger.info(f"向量检索成功: 查询='{query_request.question[:50]}...', 结果={len(documents)}个文档块")
+            else:
+                logger.warning(f"向量检索无结果: 查询='{query_request.question[:50]}...', 过滤器={query_request.filters}")
             return documents
 
         except Exception as e:
-            logger.error(f"文档检索失败: {str(e)}")
+            logger.error(f"文档向量检索失败: {str(e)}", exc_info=True)
+            # 返回空列表,让多源检索继续进行
             return []
 
     async def _retrieve_knowledge(self, query_request: QueryRequest) -> List[RetrievedKnowledge]:
         """
-        检索知识图谱
+        检索知识图谱（增强版 - 支持领域识别和智能权重评分）
+
+        实现4种优化策略：
+        1. 问题领域识别：自动判断问题所属领域
+        2. 领域内深度检索：在识别的领域内扩展到2-3跳关系
+        3. 跨域关联推理：发现领域间的关联
+        4. 领域权重评分：不同领域给予不同权重
 
         Args:
             query_request: 查询请求
 
         Returns:
-            检索到的知识列表
+            检索到的知识列表（按领域权重重新评分）
         """
         try:
-            # 调用知识图谱服务进行检索
-            graph_results = await self.knowledge_graph_service.search_knowledge(
-                query=query_request.question,
-                max_results=query_request.max_results,
-                filters=query_request.filters
-            )
+            from app.services.domain_service import DomainService
+            from app.db.session import async_session_maker
 
-            knowledge_items = []
-            for result in graph_results.get("results", []):
-                knowledge = RetrievedKnowledge(
-                    node_id=result.get("node_id", 0),
-                    node_name=result.get("name", ""),
-                    node_type=result.get("type", ""),
-                    properties=result.get("properties", {}),
-                    relationships=result.get("relationships", []),
-                    relevance_score=result.get("score", 0.0),
-                    explanation=result.get("explanation", "")
+            # 使用独立的数据库会话（避免嵌套事务问题）
+            async with async_session_maker() as db:
+                domain_service = DomainService(db)
+
+                # ===== 策略1: 问题领域识别 =====
+                inferred_domains = await domain_service.infer_question_domains(
+                    query_request.question,
+                    top_k=3  # 识别top 3个相关领域
                 )
-                knowledge_items.append(knowledge)
 
-            return knowledge_items
+                if inferred_domains:
+                    domain_info = [(d['domain_name'], f"{d['weight']:.2f}") for d in inferred_domains]
+                    logger.info(
+                        f"问题领域识别结果: {domain_info}"
+                    )
+
+                # 准备过滤条件
+                filters = query_request.filters if query_request.filters else {}
+
+                # 如果识别到领域，添加领域过滤
+                if inferred_domains:
+                    # 提取领域代码
+                    domain_codes = [d['domain_code'] for d in inferred_domains]
+                    filters['domain_codes'] = domain_codes
+
+                # 根据查询类型智能调整过滤条件（向后兼容）
+                if query_request.query_type == QueryType.MATERIAL:
+                    filters['node_type'] = ['material', 'equipment']
+                elif query_request.query_type == QueryType.COST_ESTIMATION:
+                    filters['node_type'] = ['cost', 'material', 'project']
+                elif query_request.query_type == QueryType.TECHNICAL:
+                    filters['node_type'] = ['technology', 'process', 'standard']
+
+                # ===== 策略2 & 3: 领域内深度检索 + 跨域关联推理 =====
+                # 调用知识图谱服务进行检索（1跳关系）
+                graph_results = await self.knowledge_graph_service.search_knowledge(
+                    query=query_request.question,
+                    max_results=query_request.max_results or 10,
+                    filters=filters,
+                    expand_relations=True  # 启用关系扩展（1跳查询）
+                )
+
+                knowledge_items = []
+                for result in graph_results.get("results", []):
+                    # 提取节点的领域信息
+                    node_domains = result.get("domains", [])
+
+                    # ===== 策略4: 领域权重评分 =====
+                    # 基础相关性分数
+                    base_score = result.get("score", 0.0)
+
+                    # 计算领域加权分数
+                    domain_boost = 1.0  # 默认不加权
+                    matched_domain_name = None
+                    if inferred_domains and node_domains:
+                        # 如果节点的领域与问题领域匹配，进行加权
+                        node_domain_codes = {d['domain_code'] for d in node_domains}
+                        for inferred_domain in inferred_domains:
+                            if inferred_domain['domain_code'] in node_domain_codes:
+                                # 使用领域权重进行加权
+                                domain_weight = inferred_domain['default_weight']
+                                domain_boost = max(domain_boost, domain_weight)
+                                matched_domain_name = inferred_domain['domain_name']
+                                logger.debug(
+                                    f"节点 '{result.get('name')}' 匹配领域 "
+                                    f"'{matched_domain_name}'，权重加成 {domain_weight:.2f}"
+                                )
+                                break  # 只使用最高权重
+
+                    # 计算最终分数
+                    final_score = base_score * domain_boost
+
+                    knowledge = RetrievedKnowledge(
+                        node_id=result.get("node_id", 0),
+                        node_name=result.get("name", ""),
+                        node_type=result.get("type", ""),
+                        properties=result.get("properties", {}),
+                        relationships=result.get("relationships", []),
+                        relevance_score=final_score,  # 使用加权后的分数
+                        explanation=result.get("explanation", "")
+                    )
+                    knowledge_items.append(knowledge)
+
+                # 按最终分数重新排序
+                knowledge_items.sort(key=lambda x: x.relevance_score, reverse=True)
+
+                if knowledge_items:
+                    logger.info(
+                        f"知识图谱检索成功: 查询='{query_request.question}', "
+                        f"结果={len(knowledge_items)}个节点, "
+                        f"领域={[d['domain_name'] for d in inferred_domains[:2]] if inferred_domains else '未识别'}"
+                    )
+                else:
+                    logger.warning(f"知识图谱检索无结果: 查询='{query_request.question}', 过滤器={filters}")
+
+                return knowledge_items
 
         except Exception as e:
-            logger.error(f"知识图谱检索失败: {str(e)}")
+            logger.error(f"知识图谱检索失败: {str(e)}", exc_info=True)
+            # 返回空列表,让多源检索继续进行
             return []
 
     async def _retrieve_cost_data(self, query_request: QueryRequest) -> List[RetrievedCostData]:
@@ -365,15 +489,22 @@ class QAService:
             cost_items = []
             for result in cost_results.get("results", []):
                 cost_data = RetrievedCostData(
-                    cost_id=result.get("id"),
-                    item_name=result.get("item_name", ""),
-                    category=result.get("category", ""),
-                    unit=result.get("unit", ""),
-                    price_range=result.get("price_range", {}),
-                    region=result.get("region"),
-                    time_period=result.get("time_period", ""),
-                    relevance_score=result.get("score", 0.0),
-                    source=result.get("source", "")
+                    id=result.get("id"),
+                    project_id=result.get("project_id"),
+                    project_name=result.get("project_name", "未命名项目"),
+                    project_type=result.get("project_type"),
+                    location=result.get("location"),
+                    building_area=result.get("building_area"),
+                    unit_price=result.get("unit_price"),
+                    total_cost=result.get("total_cost"),
+                    floors=result.get("floors"),
+                    structure_type=result.get("structure_type"),
+                    completion_date=result.get("completion_date"),
+                    status=result.get("status"),
+                    relevance_score=result.get("relevance_score", 0.0),
+                    match_reason=result.get("match_reason"),
+                    notes=result.get("notes"),
+                    cost_items=result.get("cost_items")  # 添加成本明细数据
                 )
                 cost_items.append(cost_data)
 
@@ -382,6 +513,107 @@ class QAService:
         except Exception as e:
             logger.error(f"成本数据检索失败: {str(e)}")
             return []
+
+    def _validate_api_key(self, provider: AIProvider, api_key: str) -> tuple[bool, str]:
+        """
+        验证API key的格式
+
+        Args:
+            provider: AI提供商
+            api_key: API密钥
+
+        Returns:
+            (是否有效, 错误信息)
+        """
+        if not api_key or not isinstance(api_key, str):
+            return False, "API key为空或格式错误"
+
+        # 移除首尾空白
+        api_key = api_key.strip()
+
+        # 检查最小长度
+        if len(api_key) < 10:
+            return False, f"API key长度过短({len(api_key)}字符)，可能无效"
+
+        # 根据不同提供商验证格式
+        if provider == AIProvider.MOONSHOT:
+            if not api_key.startswith('sk-'):
+                return False, "月之暗面API key应以'sk-'开头"
+            if len(api_key) < 20:
+                return False, f"月之暗面API key长度过短({len(api_key)}字符)"
+
+        elif provider == AIProvider.ZHIPUAI:
+            # 智谱AI的API key通常包含点号分隔的部分
+            if '.' not in api_key:
+                logger.warning("智谱AI的API key格式可能不正确（缺少.分隔符）")
+
+        elif provider == AIProvider.DASHSCOPE:
+            if not api_key.startswith('sk-'):
+                logger.warning("阿里千问API key通常以'sk-'开头")
+
+        # 检查是否包含明显的占位符
+        placeholder_keywords = ['your', 'api', 'key', 'here', 'xxx', 'test', 'example', '请输入', '填写']
+        api_key_lower = api_key.lower()
+        for keyword in placeholder_keywords:
+            if keyword in api_key_lower:
+                return False, f"API key看起来像是占位符（包含'{keyword}'）"
+
+        return True, ""
+
+    async def _get_available_ai_provider(self) -> Optional[AIProvider]:
+        """
+        获取可用的AI提供商
+
+        按优先级顺序检查可用的AI模型配置，并验证API key格式
+
+        Returns:
+            可用的AI提供商，如果没有可用的则返回None
+        """
+        # 按优先级顺序检查提供商 - 月之暗面API密钥有效，设为最高优先级
+        provider_priority = [
+            AIProvider.MOONSHOT,     # 月之暗面 - API密钥有效，优先级最高
+            AIProvider.ZHIPUAI,      # 智谱AI
+            AIProvider.DASHSCOPE,    # 阿里千问
+            AIProvider.DEEPSEEK,     # 深度求索
+            AIProvider.YI,           # 零一万物
+            AIProvider.BAIDU,        # 百度文心一言
+            AIProvider.SPARK         # 科大讯飞星火
+        ]
+
+        for provider in provider_priority:
+            try:
+                # 获取配置
+                config = await self.ai_model_service._get_provider_api_config(provider)
+                api_key = config.get('api_key')
+                enabled = config.get('enabled', True)
+
+                # 基本检查
+                if not api_key:
+                    logger.debug(f"{provider.value}: API key未配置")
+                    continue
+
+                if not enabled:
+                    logger.debug(f"{provider.value}: 已禁用")
+                    continue
+
+                # 格式验证
+                is_valid, error_msg = self._validate_api_key(provider, api_key)
+                if not is_valid:
+                    logger.warning(f"{provider.value}: API key验证失败 - {error_msg}")
+                    continue
+
+                # 验证通过
+                logger.info(f"✅ 找到可用的AI提供商: {provider.value}")
+                logger.debug(f"   API key: {api_key[:6]}...{api_key[-4:] if len(api_key) > 10 else '***'}")
+                return provider
+
+            except Exception as e:
+                logger.warning(f"检查{provider.value}配置时出错: {str(e)}")
+                continue
+
+        logger.warning("⚠️  没有找到可用的AI提供商配置")
+        logger.info("提示：请在【系统设置】中配置至少一个AI模型的API密钥")
+        return None
 
     async def _generate_answer(
         self,
@@ -406,20 +638,40 @@ class QAService:
         # 2. 构建提示词
         prompt = self._build_generation_prompt(query_request, context)
 
-        # 3. 调用AI模型生成答案
+        # 3. 选择可用的AI模型
         try:
-            ai_response = await self.ai_model_service.chat_completion({
-                "provider": AIProvider.ZHIPUAI,  # 可以根据查询类型选择不同的提供商
-                "model": "glm-4",
-                "messages": [
+            logger.info("=== DEBUG: 开始选择AI提供商 ===")
+            # 动态选择可用的AI提供商
+            available_provider = await self._get_available_ai_provider()
+            logger.info(f"=== DEBUG: 选择的提供商: {available_provider} ===")
+
+            if not available_provider:
+                raise ValueError("没有可用的AI模型配置")
+
+            logger.info(f"使用AI提供商: {available_provider.value}")
+            logger.info("=== DEBUG: 准备调用AI服务 ===")
+
+            ai_response = await self.ai_model_service.chat_completion(
+                provider=available_provider,
+                messages=[
                     {"role": "system", "content": "你是一个专业的工程成本咨询专家，请基于提供的上下文信息回答用户问题。"},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": 0.7,
-                "max_tokens": 2000
-            })
+                temperature=0.7,
+                max_tokens=2000
+            )
 
-            answer_content = ai_response.content
+            logger.info(f"=== DEBUG: AI响应类型: {type(ai_response)} ===")
+            logger.info(f"=== DEBUG: AI响应是否为字典: {isinstance(ai_response, dict)} ===")
+            if isinstance(ai_response, dict):
+                logger.info(f"=== DEBUG: AI响应的键: {list(ai_response.keys())} ===")
+                logger.info(f"=== DEBUG: content字段存在: {'content' in ai_response} ===")
+                logger.info(f"=== DEBUG: content内容长度: {len(ai_response.get('content', ''))} ===")
+
+            # 从统一格式的响应中提取内容（ai_response是字典，不是对象）
+            answer_content = ai_response.get('content', '')
+            logger.info(f"=== DEBUG: 提取的答案内容长度: {len(answer_content)} ===")
+
             confidence_score = self._calculate_confidence_score(answer_content, retrieval_result)
             quality_score = self._calculate_quality_score(answer_content, retrieval_result)
 
@@ -429,6 +681,7 @@ class QAService:
 
             generation_time = time.time() - start_time
 
+            logger.info("=== DEBUG: 成功生成答案，准备返回 ===")
             return GeneratedAnswer(
                 answer=answer_content,
                 confidence_score=confidence_score,
@@ -436,20 +689,106 @@ class QAService:
                 sources=sources,
                 references=references,
                 generation_time=generation_time,
-                model_used=ai_response.model,
-                token_usage=ai_response.usage
+                model_used=ai_response.get('model', 'unknown'),
+                token_usage=ai_response.get('usage', {})
             )
 
-        except Exception as e:
-            logger.error(f"答案生成失败: {str(e)}")
-            # 返回基础答案
+        except ValueError as e:
+            # API配置错误
+            error_msg = str(e)
+            logger.error(f"=== API配置错误 ===")
+            logger.error(f"错误信息: {error_msg}")
+
+            # 提供明确的错误提示
+            if "没有可用的AI模型配置" in error_msg:
+                user_message = "系统尚未配置AI模型。请在【系统设置】中配置至少一个AI模型的API密钥。"
+            elif "未配置API密钥" in error_msg:
+                user_message = f"AI模型配置错误：{error_msg}。请检查系统设置中的API密钥配置。"
+            else:
+                user_message = f"配置错误：{error_msg}"
+
             return GeneratedAnswer(
-                answer="抱歉，无法生成答案，请稍后重试。",
+                answer=user_message,
                 confidence_score=0.0,
                 quality_score=0.0,
                 generation_time=time.time() - start_time,
-                model_used="fallback"
+                model_used="error",
+                metadata={"error_type": "config_error", "error_detail": error_msg}
             )
+
+        except Exception as e:
+            # 其他异常（包括HTTP错误、网络错误等）
+            import traceback
+            import aiohttp
+
+            error_msg = str(e)
+            error_type = type(e).__name__
+
+            logger.error(f"=== 答案生成异常 ===")
+            logger.error(f"异常类型: {error_type}")
+            logger.error(f"异常信息: {error_msg}")
+            logger.error(f"完整堆栈:\n{traceback.format_exc()}")
+
+            # 根据异常类型提供具体的错误信息
+            if isinstance(e, aiohttp.ClientResponseError):
+                # HTTP错误
+                status = e.status
+                if status == 401:
+                    user_message = "API密钥无效或已过期，请在【系统设置】中检查并更新API密钥。"
+                    error_category = "auth_error"
+                elif status == 429:
+                    user_message = "API调用频率超限，请稍后重试。如果问题持续，请检查API配额。"
+                    error_category = "rate_limit_error"
+                elif status >= 500:
+                    user_message = "AI服务暂时不可用，请稍后重试。"
+                    error_category = "service_error"
+                else:
+                    user_message = f"AI服务返回错误(HTTP {status})，请稍后重试。"
+                    error_category = "http_error"
+
+                return GeneratedAnswer(
+                    answer=user_message,
+                    confidence_score=0.0,
+                    quality_score=0.0,
+                    generation_time=time.time() - start_time,
+                    model_used="error",
+                    metadata={"error_type": error_category, "http_status": status, "error_detail": error_msg}
+                )
+
+            elif isinstance(e, (aiohttp.ClientError, aiohttp.ServerTimeoutError)):
+                # 网络错误
+                user_message = "网络连接失败，请检查网络连接或稍后重试。"
+                return GeneratedAnswer(
+                    answer=user_message,
+                    confidence_score=0.0,
+                    quality_score=0.0,
+                    generation_time=time.time() - start_time,
+                    model_used="error",
+                    metadata={"error_type": "network_error", "error_detail": error_msg}
+                )
+
+            elif "timeout" in error_msg.lower():
+                # 超时错误
+                user_message = "请求超时，请稍后重试。"
+                return GeneratedAnswer(
+                    answer=user_message,
+                    confidence_score=0.0,
+                    quality_score=0.0,
+                    generation_time=time.time() - start_time,
+                    model_used="error",
+                    metadata={"error_type": "timeout_error", "error_detail": error_msg}
+                )
+            else:
+                # 未知错误
+                user_message = f"系统错误：{error_msg}。请稍后重试或联系管理员。"
+                return GeneratedAnswer(
+                    answer=user_message,
+                    confidence_score=0.0,
+                    quality_score=0.0,
+                    generation_time=time.time() - start_time,
+                    model_used="error",
+                    metadata={"error_type": "unknown_error", "error_class": error_type, "error_detail": error_msg}
+                )
 
     async def _postprocess_answer(
         self,
@@ -542,9 +881,16 @@ class QAService:
         for knowledge in retrieval_result.knowledge[:3]:
             context_parts.append(f"知识[{knowledge.node_name}]: {knowledge.properties}")
 
-        # 添加成本数据
+        # 添加成本数据（项目成本）
         for cost in retrieval_result.cost_data[:3]:
-            context_parts.append(f"成本数据[{cost.item_name}]: {cost.price_range}")
+            cost_info = f"项目: {cost.project_name}"
+            if cost.building_area:
+                cost_info += f", 面积: {cost.building_area}㎡"
+            if cost.unit_price:
+                cost_info += f", 单价: ¥{cost.unit_price}/㎡"
+            if cost.total_cost:
+                cost_info += f", 总造价: ¥{cost.total_cost}"
+            context_parts.append(f"历史成本数据[{cost_info}]")
 
         return "\n\n".join(context_parts)
 
@@ -619,17 +965,24 @@ class QAService:
         return min(1.0, score)
 
     def _build_sources_info(self, retrieval_result: RetrievalResult) -> List[Dict[str, Any]]:
-        """构建来源信息"""
+        """构建来源信息（按文档去重）"""
         sources = []
+        seen_doc_ids = set()
 
-        # 文档来源
-        for doc in retrieval_result.documents[:5]:
-            sources.append({
-                "type": "document",
-                "id": doc.document_id,
-                "title": doc.title,
-                "relevance": doc.relevance_score
-            })
+        # 文档来源 - 按文档ID去重
+        for doc in retrieval_result.documents:
+            if doc.document_id not in seen_doc_ids:
+                sources.append({
+                    "type": "document",
+                    "id": doc.document_id,
+                    "title": doc.title,
+                    "relevance": doc.relevance_score
+                })
+                seen_doc_ids.add(doc.document_id)
+                
+                # 最多显示5个不同的文档
+                if len(sources) >= 5:
+                    break
 
         # 知识图谱来源
         for knowledge in retrieval_result.knowledge[:5]:
@@ -643,17 +996,20 @@ class QAService:
         return sources
 
     def _build_references(self, retrieval_result: RetrievalResult) -> List[Dict[str, Any]]:
-        """构建参考文献"""
+        """构建参考文献（按文档去重）"""
         references = []
+        seen_doc_ids = set()
 
-        # 文档引用
+        # 文档引用 - 按文档ID去重
         for doc in retrieval_result.documents:
-            references.append({
-                "type": "document",
-                "title": doc.title,
-                "file_path": doc.file_path,
-                "relevance": doc.relevance_score
-            })
+            if doc.document_id not in seen_doc_ids:
+                references.append({
+                    "type": "document",
+                    "title": doc.title,
+                    "file_path": doc.file_path,
+                    "relevance": doc.relevance_score
+                })
+                seen_doc_ids.add(doc.document_id)
 
         return references
 

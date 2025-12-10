@@ -9,17 +9,11 @@ import {
   Space,
   Statistic,
   Button,
-  Tooltip,
-  Progress,
-  Avatar,
-  Divider,
   Badge,
-  Spin,
-  message
+  Spin
 } from 'antd'
 import {
   GlobalOutlined,
-  FileTextOutlined,
   DollarOutlined,
   RiseOutlined,
   FallOutlined,
@@ -28,8 +22,10 @@ import {
   EyeOutlined,
   LinkOutlined,
   SyncOutlined,
-  NotificationOutlined
+  NotificationOutlined,
+  FileTextOutlined
 } from '@ant-design/icons'
+import './DashboardPage.css'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -44,7 +40,6 @@ interface NewsItem {
   tags: string[]
   readCount: number
   importance: 'high' | 'medium' | 'low'
-  url?: string
 }
 
 // 材料价格接口
@@ -79,8 +74,7 @@ const DashboardPage: React.FC = () => {
       category: 'policy',
       tags: ['政策法规', '行业标准', '工程造价'],
       readCount: 15234,
-      importance: 'high',
-      url: 'https://www.mohurd.gov.cn/...'
+      importance: 'high'
     },
     {
       id: '2',
@@ -169,159 +163,178 @@ const DashboardPage: React.FC = () => {
     }
   ]
 
+  // 加载数据
   useEffect(() => {
-    loadData()
-    // 设置自动刷新（每30分钟）
-    const interval = setInterval(() => {
-      loadData()
-    }, 30 * 60 * 1000)
-    return () => clearInterval(interval)
+    loadNews()
+    loadPrices()
   }, [])
 
-  const loadData = async () => {
+  const loadNews = async () => {
     setNewsLoading(true)
-    setPriceLoading(true)
-
-    try {
-      // 模拟API调用
-      await new Promise(resolve => setTimeout(resolve, 1000))
+    // 模拟API调用
+    setTimeout(() => {
       setNewsList(mockNewsData)
-      setMaterialPrices(mockPriceData)
-      setLastUpdateTime(new Date().toLocaleString())
-    } catch (error) {
-      message.error('数据加载失败')
-    } finally {
       setNewsLoading(false)
-      setPriceLoading(false)
-    }
+      setLastUpdateTime(new Date().toLocaleString('zh-CN'))
+    }, 500)
   }
 
-  const getCategoryColor = (category: string) => {
-    const colors = {
+  const loadPrices = async () => {
+    setPriceLoading(true)
+    // 模拟API调用
+    setTimeout(() => {
+      setMaterialPrices(mockPriceData)
+      setPriceLoading(false)
+    }, 500)
+  }
+
+  const refreshData = () => {
+    loadNews()
+    loadPrices()
+  }
+
+  // 渲染分类标签
+  const renderCategoryTag = (category: string, importance: string) => {
+    const colors: Record<string, string> = {
       policy: 'red',
       industry: 'blue',
       market: 'green',
       technology: 'purple'
     }
-    return colors[category] || 'default'
-  }
-
-  const getCategoryName = (category: string) => {
-    const names = {
-      policy: '政策法规',
-      industry: '行业动态',
-      market: '市场行情',
-      technology: '技术创新'
-    }
-    return names[category] || '其他'
-  }
-
-  const getImportanceIcon = (importance: string) => {
-    switch (importance) {
-      case 'high':
-        return <FireOutlined style={{ color: '#ff4d4f' }} />
-      case 'medium':
-        return <NotificationOutlined style={{ color: '#fa8c16' }} />
-      default:
-        return <GlobalOutlined style={{ color: '#1890ff' }} />
-    }
+    return (
+      <Tag color={colors[category] || 'default'} className={importance === 'high' ? 'tag-important' : ''}>
+        {category === 'policy' && '政策法规'}
+        {category === 'industry' && '行业动态'}
+        {category === 'market' && '市场行情'}
+        {category === 'technology' && '技术创新'}
+      </Tag>
+    )
   }
 
   return (
-    <div style={{ padding: '24px' }}>
-      {/* 页面头部 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <Title level={2} style={{ margin: 0 }}>
+    <div className="dashboard-modern">
+      {/* 背景装饰 */}
+      <div className="bg-orb bg-orb-1" style={{ top: '-300px', right: '-300px' }} />
+      <div className="bg-orb bg-orb-2" style={{ bottom: '-250px', left: '-250px' }} />
+
+      {/* 页面标题 */}
+      <div className="dashboard-header">
+        <Title level={2} className="page-title gradient-text">
           行业资讯
         </Title>
         <Space>
-          <Text type="secondary">
-            最后更新：{lastUpdateTime}
-          </Text>
+          <Text type="secondary">最后更新：{lastUpdateTime || '--'}</Text>
           <Button
-            icon={<SyncOutlined />}
-            onClick={loadData}
-            loading={newsLoading || priceLoading}
+            icon={newsLoading ? <SyncOutlined spin /> : <SyncOutlined />}
+            onClick={refreshData}
+            className="refresh-btn"
           >
             刷新数据
           </Button>
         </Space>
       </div>
 
-      <Row gutter={[24, 24]}>
-        {/* 行业新闻 */}
-        <Col xs={24} lg={16}>
+      {/* 统计卡片 */}
+      <Row gutter={[24, 24]} className="stats-section">
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="glass-stat-card fade-in" style={{ animationDelay: '0.1s' }}>
+            <Statistic
+              title="今日资讯"
+              value={12}
+              prefix={<GlobalOutlined className="stat-icon" style={{ color: '#667eea' }} />}
+              valueStyle={{ color: '#667eea', fontWeight: 'bold' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="glass-stat-card fade-in" style={{ animationDelay: '0.2s' }}>
+            <Statistic
+              title="政策更新"
+              value={3}
+              prefix={<FileTextOutlined className="stat-icon" style={{ color: '#764ba2' }} />}
+              valueStyle={{ color: '#764ba2', fontWeight: 'bold' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="glass-stat-card fade-in" style={{ animationDelay: '0.3s' }}>
+            <Statistic
+              title="价格监控"
+              value={156}
+              prefix={<DollarOutlined className="stat-icon" style={{ color: '#f093fb' }} />}
+              valueStyle={{ color: '#f093fb', fontWeight: 'bold' }}
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} lg={6}>
+          <Card className="glass-stat-card fade-in" style={{ animationDelay: '0.4s' }}>
+            <Statistic
+              title="市场热度"
+              value={85}
+              suffix="%"
+              prefix={<RiseOutlined className="stat-icon" style={{ color: '#43e97b' }} />}
+              valueStyle={{ color: '#43e97b', fontWeight: 'bold' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 主内容区 */}
+      <Row gutter={[24, 24]} className="content-section">
+        {/* 行业资讯 */}
+        <Col xs={24} lg={14}>
           <Card
+            className="glass-card news-card"
             title={
               <Space>
-                <GlobalOutlined />
+                <GlobalOutlined className="gradient-text" />
                 <span>行业资讯</span>
-                <Badge count={newsList.length} showZero />
+                <Badge count={newsList.length} style={{ backgroundColor: '#667eea' }} />
               </Space>
             }
             extra={
-              <Button type="link" size="small">
-                查看更多 <LinkOutlined />
+              <Button type="link" icon={<LinkOutlined />}>
+                查看更多
               </Button>
             }
           >
             <Spin spinning={newsLoading}>
               <List
                 dataSource={newsList}
-                renderItem={(item) => (
+                renderItem={(item, index) => (
                   <List.Item
-                    style={{ padding: '16px 0', borderBottom: '1px solid #f0f0f0' }}
-                    actions={[
-                      <Tooltip title="阅读量">
-                        <Space>
-                          <EyeOutlined />
-                          <Text type="secondary">{item.readCount}</Text>
-                        </Space>
-                      </Tooltip>
-                    ]}
+                    className="news-item fade-in"
+                    style={{ animationDelay: `${0.1 * (index + 1)}s` }}
                   >
-                    <List.Item.Meta
-                      avatar={
-                        <Avatar
-                          icon={getImportanceIcon(item.importance)}
-                          style={{
-                            backgroundColor: item.importance === 'high' ? '#fff2e8' : '#f6ffed',
-                            color: item.importance === 'high' ? '#fa8c16' : '#52c41a'
-                          }}
-                        />
-                      }
-                      title={
-                        <Space>
-                          <Text strong style={{ fontSize: '16px' }}>
-                            {item.title}
-                          </Text>
-                          <Tag color={getCategoryColor(item.category)}>
-                            {getCategoryName(item.category)}
-                          </Tag>
-                        </Space>
-                      }
-                      description={
-                        <div>
-                          <Paragraph
-                            style={{ marginBottom: '8px', color: '#666' }}
-                            ellipsis={{ rows: 2 }}
-                          >
-                            {item.summary}
-                          </Paragraph>
-                          <Space wrap>
-                            <Text type="secondary" style={{ fontSize: '12px' }}>
-                              <ClockCircleOutlined /> {item.publishTime}
-                            </Text>
-                            <Text type="secondary" style={{ fontSize: '12px' }}>
-                              来源：{item.source}
-                            </Text>
+                    <div className="news-item-content">
+                      <div className="news-icon">
+                        {item.importance === 'high' ? <FireOutlined /> : <NotificationOutlined />}
+                      </div>
+                      <div className="news-details">
+                        <Title level={4} className="news-title">
+                          <span>{item.title}</span>
+                          {renderCategoryTag(item.category, item.importance)}
+                        </Title>
+                        <Paragraph className="news-summary" ellipsis={{ rows: 2 }}>
+                          {item.summary}
+                        </Paragraph>
+                        <div className="news-meta">
+                          <Space split={<span className="separator">·</span>}>
+                            <span><ClockCircleOutlined /> {item.publishTime}</span>
+                            <span>来源：{item.source}</span>
                             {item.tags.map(tag => (
-                              <Tag key={tag} size="small">{tag}</Tag>
+                              <Tag key={tag} className="meta-tag">{tag}</Tag>
                             ))}
                           </Space>
                         </div>
-                      }
-                    />
+                      </div>
+                      <div className="news-stats">
+                        <Space direction="vertical" align="center">
+                          <EyeOutlined />
+                          <Text type="secondary">{item.readCount.toLocaleString()}</Text>
+                        </Space>
+                      </div>
+                    </div>
                   </List.Item>
                 )}
               />
@@ -329,129 +342,56 @@ const DashboardPage: React.FC = () => {
           </Card>
         </Col>
 
-        {/* 材料价格 */}
-        <Col xs={24} lg={8}>
+        {/* 主要材料价格 */}
+        <Col xs={24} lg={10}>
           <Card
+            className="glass-card price-card"
             title={
               <Space>
-                <DollarOutlined />
+                <DollarOutlined className="gradient-text" />
                 <span>主要材料价格</span>
-                <Badge count={materialPrices.length} showZero />
+                <Badge count={materialPrices.length} style={{ backgroundColor: '#764ba2' }} />
               </Space>
             }
             extra={
-              <Button type="link" size="small">
-                详细行情 <LinkOutlined />
+              <Button type="link" icon={<LinkOutlined />}>
+                详细行情
               </Button>
             }
           >
             <Spin spinning={priceLoading}>
-              <Space direction="vertical" style={{ width: '100%' }} size="middle">
-                {materialPrices.map((item) => (
+              <div className="price-list">
+                {materialPrices.map((item, index) => (
                   <div
                     key={item.id}
-                    style={{
-                      padding: '12px',
-                      border: '1px solid #f0f0f0',
-                      borderRadius: '6px',
-                      backgroundColor: '#fafafa'
-                    }}
+                    className="price-item fade-in"
+                    style={{ animationDelay: `${0.1 * (index + 1)}s` }}
                   >
-                    <div style={{ marginBottom: '8px' }}>
-                      <Text strong>{item.name}</Text>
-                      <Text
-                        type="secondary"
-                        style={{ fontSize: '12px', marginLeft: '8px' }}
-                      >
-                        {item.specification}
-                      </Text>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div className="price-header">
                       <div>
-                        <Text style={{ fontSize: '18px', fontWeight: 'bold', color: '#1890ff' }}>
-                          ¥{item.currentPrice}
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: '12px', marginLeft: '4px' }}>
-                          /{item.unit}
-                        </Text>
+                        <Text strong className="material-name">{item.name}</Text>
+                        <Text type="secondary" className="material-spec">{item.specification}</Text>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <Space>
-                          {item.trend === 'up' && <RiseOutlined style={{ color: '#f5222d' }} />}
-                          {item.trend === 'down' && <FallOutlined style={{ color: '#52c41a' }} />}
-                          <Text
-                            style={{
-                              fontSize: '12px',
-                              color: item.trend === 'up' ? '#f5222d' : item.trend === 'down' ? '#52c41a' : '#666'
-                            }}
-                          >
-                            {item.changePercent > 0 ? '+' : ''}{item.changePercent}%
-                          </Text>
-                        </Space>
-                        <div>
-                          <Text type="secondary" style={{ fontSize: '10px' }}>
-                            {item.market}
-                          </Text>
+                      <div className="price-value">
+                        <div className="current-price">
+                          <span className="price-currency">¥{item.currentPrice.toLocaleString()}</span>
+                          <span className="price-unit">/{item.unit}</span>
                         </div>
+                        <div className={`price-change ${item.trend}`}>
+                          {item.trend === 'up' && <RiseOutlined />}
+                          {item.trend === 'down' && <FallOutlined />}
+                          <span>{item.changePercent > 0 ? '+' : ''}{item.changePercent}%</span>
+                        </div>
+                        <Text type="secondary" className="market-name">{item.market}</Text>
                       </div>
                     </div>
                   </div>
                 ))}
-              </Space>
-
-              <Divider />
-
-              <div style={{ textAlign: 'center' }}>
-                <Text type="secondary" style={{ fontSize: '12px' }}>
-                  数据更新时间：{materialPrices[0]?.updateTime || '--'}
-                </Text>
+              </div>
+              <div className="price-footer">
+                <Text type="secondary">数据更新时间：{materialPrices[0]?.updateTime || '--'}</Text>
               </div>
             </Spin>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* 快速统计 */}
-      <Row gutter={[16, 16]} style={{ marginTop: '24px' }}>
-        <Col xs={24} sm={8} md={6}>
-          <Card size="small">
-            <Statistic
-              title="今日资讯"
-              value={12}
-              prefix={<GlobalOutlined />}
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={8} md={6}>
-          <Card size="small">
-            <Statistic
-              title="政策更新"
-              value={3}
-              prefix={<FileTextOutlined />}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={8} md={6}>
-          <Card size="small">
-            <Statistic
-              title="价格监控"
-              value={156}
-              prefix={<DollarOutlined />}
-              valueStyle={{ color: '#fa8c16' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={8} md={6}>
-          <Card size="small">
-            <Statistic
-              title="市场热度"
-              value={85}
-              suffix="%"
-              prefix={<RiseOutlined />}
-              valueStyle={{ color: '#722ed1' }}
-            />
           </Card>
         </Col>
       </Row>

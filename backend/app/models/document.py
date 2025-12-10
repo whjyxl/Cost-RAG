@@ -4,7 +4,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, JSON, Boolean, ForeignKey, LargeBinary
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY
 import uuid
 
 from app.db.session import Base
@@ -16,7 +16,8 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
-    uuid = Column(UUID(as_uuid=True), default=uuid.uuid4, unique=True, index=True)
+    # 使用String存储UUID以兼容SQLite和PostgreSQL
+    uuid = Column(String(36), default=lambda: str(uuid.uuid4()), unique=True, index=True)
 
     # 基本信息
     title = Column(String(500), nullable=False, index=True)
@@ -24,6 +25,7 @@ class Document(Base):
     file_name = Column(String(255), nullable=False)
     file_path = Column(String(1000), nullable=False)
     file_size = Column(Float, nullable=False)  # 文件大小（字节）
+    file_hash = Column(String(32), nullable=True, index=True)  # MD5文件哈希,用于重复检测
 
     # 文件类型和格式
     mime_type = Column(String(100), nullable=False)
@@ -32,8 +34,9 @@ class Document(Base):
 
     # 文档分类
     category = Column(String(100), nullable=True)  # 合同、技术规范、标准、案例等
-    tags = Column(ARRAY(String), nullable=True)  # 标签
-    keywords = Column(ARRAY(String), nullable=True)  # 关键词
+    # 使用JSON存储以兼容SQLite和PostgreSQL
+    tags = Column(JSON, nullable=True)  # 标签列表
+    keywords = Column(JSON, nullable=True)  # 关键词列表
 
     # 处理状态
     status = Column(String(50), default="pending")  # pending, processing, completed, failed
@@ -54,10 +57,11 @@ class Document(Base):
     # 权限和访问
     is_public = Column(Boolean, default=False)
     access_level = Column(String(20), default="private")  # private, team, public
-    allowed_users = Column(ARRAY(Integer), nullable=True)
+    # 使用JSON存储以兼容SQLite和PostgreSQL
+    allowed_users = Column(JSON, nullable=True)  # 允许访问的用户ID列表
 
     # 元数据
-    metadata = Column(JSON, nullable=True)  # 文档元数据
+    doc_metadata = Column('metadata', JSON, nullable=True)  # 文档元数据（映射到metadata列）
     extracted_data = Column(JSON, nullable=True)  # 提取的结构化数据
     thumbnail = Column(LargeBinary, nullable=True)  # 缩略图
 
@@ -159,11 +163,12 @@ class DocumentChunk(Base):
     bbox = Column(JSON, nullable=True)  # 边界框坐标
 
     # 向量数据
-    embedding_vector = Column(ARRAY(Float), nullable=True)  # 嵌入向量
+    # 使用JSON存储以兼容SQLite和PostgreSQL
+    embedding_vector = Column(JSON, nullable=True)  # 嵌入向量（存储为Float列表）
     embedding_model = Column(String(100), nullable=True)
 
     # 元数据
-    metadata = Column(JSON, nullable=True)
+    chunk_metadata = Column('metadata', JSON, nullable=True)  # 分块元数据（映射到metadata列）
     language = Column(String(10), nullable=True)  # 语言
     token_count = Column(Integer, nullable=True)
 

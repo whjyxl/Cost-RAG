@@ -92,9 +92,8 @@ class EntityUpdate(BaseModel):
 class KnowledgeNode(EntityBase):
     """知识节点完整模式"""
     id: int = Field(..., description="节点ID")
-    user_id: int = Field(..., description="用户ID")
-    created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
+    updated_at: Optional[datetime] = Field(None, description="更新时间")
 
     class Config:
         from_attributes = True

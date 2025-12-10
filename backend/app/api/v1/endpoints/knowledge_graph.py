@@ -3,7 +3,7 @@
 """
 import time
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,7 +11,8 @@ from app.api.deps import get_current_user, get_db
 from app.models.user import User
 from app.schemas.knowledge import (
     KnowledgeNode, KnowledgeNodeSummary, KnowledgeRelation, KnowledgeRelationSummary,
-    EntityCreate, RelationCreate, EntityExtractionRequest, RelationExtractionRequest,
+    EntityCreate, RelationCreate, EntityUpdate, RelationUpdate,
+    EntityExtractionRequest, RelationExtractionRequest,
     DocumentProcessingRequest, DocumentProcessingResult, GraphQueryRequest,
     GraphQueryResult, KnowledgeStatistics, GraphVisualizationData
 )
@@ -227,86 +228,273 @@ async def query_knowledge_graph(
         raise HTTPException(status_code=500, detail="知识图谱查询失败")
 
 
-@router.get("/nodes", response_model=List[KnowledgeNodeSummary])
+# 不完整节点黑名单（明显的截断片段）
+INCOMPLETE_NODE_BLACKLIST = {
+    # 截断片段
+    '量清单', '量偏差', '量计算', '量审核',
+    '理或造价', '理单位', '理费',
+    '师暂定', '师资格',
+    '及消防', '及园林', '及智能化', '及给排水',
+    '红线内', '红线外',
+    '公共区', '商业区', '住宅区',
+    # 连接词开头
+    '及报警', '及联动', '及配套', '及附属',
+    '和税金', '和利润', '和管理费',
+    '或工作', '或服务', '或材料',
+    # 过于泛化
+    '相关工程', '其他工程', '各种材料', '所有设备',
+    # 单字节点
+    '费', '量', '理', '师', '区', '内', '外', '及', '和', '或',
+}
+
+@router.get("/nodes", response_model=List[Dict[str, Any]])
 async def get_knowledge_nodes(
     node_type: Optional[str] = Query(None, description="节点类型过滤"),
     search_term: Optional[str] = Query(None, description="搜索关键词"),
     min_confidence: Optional[float] = Query(None, ge=0.0, le=1.0, description="最小置信度"),
-    limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
+    domain_code: Optional[str] = Query(None, description="领域代码过滤"),
+    limit: int = Query(100, ge=1, le=500, description="返回数量限制"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取知识节点列表"""
+    """获取知识节点列表（包含领域信息，已过滤不完整节点）"""
     try:
-        query_request = GraphQueryRequest(
-            query_type="node_search",
-            node_type=node_type,
-            search_term=search_term,
-            min_confidence=min_confidence,
-            limit=limit
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from app.models.knowledge import KnowledgeNode as KnowledgeNodeModel
+        from app.models.domain import NodeDomainMapping, KnowledgeDomain
+        
+        # 构建查询，预加载领域映射
+        query = select(KnowledgeNodeModel).options(
+            selectinload(KnowledgeNodeModel.domain_mappings).selectinload(NodeDomainMapping.domain)
         )
-
-        result = await knowledge_graph_service.query_knowledge_graph(
-            query_request=query_request,
-            user_id=current_user.id,
-            db=db
-        )
-
-        nodes = result.get('nodes', [])
-        return [
-            KnowledgeNodeSummary(
-                id=node['id'],
-                name=node['name'],
-                type=node['type'],
-                confidence=node['confidence'],
-                created_at=node['created_at']
+        
+        # 应用过滤条件
+        if node_type:
+            query = query.where(KnowledgeNodeModel.node_type == node_type)
+        
+        if search_term:
+            query = query.where(KnowledgeNodeModel.name.ilike(f'%{search_term}%'))
+        
+        if min_confidence is not None:
+            query = query.where(KnowledgeNodeModel.confidence >= min_confidence)
+        
+        if domain_code:
+            # 筛选特定领域的节点
+            query = query.join(NodeDomainMapping).join(KnowledgeDomain).where(
+                KnowledgeDomain.domain_code == domain_code
             )
-            for node in nodes
+        
+        query = query.limit(limit * 2)  # 获取更多数据以便过滤后达到limit
+        result = await db.execute(query)
+        nodes = result.scalars().all()
+        
+        # 过滤不完整节点
+        filtered_nodes = [
+            node for node in nodes
+            if node.name not in INCOMPLETE_NODE_BLACKLIST
+        ][:limit]  # 限制最终返回数量
+        
+        logger.info(f"节点过滤: 原始{len(nodes)}个 -> 过滤后{len(filtered_nodes)}个")
+        
+        # 转换为响应格式（包含领域信息）
+        return [
+            {
+                "id": node.id,
+                "name": node.name,
+                "type": node.node_type,
+                "confidence": node.confidence if node.confidence is not None else 0.5,
+                "created_at": node.created_at.isoformat() if node.created_at else None,
+                "properties": node.properties if node.properties else {},
+                "domains": [
+                    {
+                        "domain_code": mapping.domain.domain_code,
+                        "domain_name": mapping.domain.domain_name,
+                        "color": mapping.domain.color,
+                        "is_primary": mapping.is_primary,
+                        "confidence": mapping.confidence
+                    }
+                    for mapping in node.domain_mappings
+                ] if hasattr(node, 'domain_mappings') else []
+            }
+            for node in filtered_nodes
         ]
 
     except Exception as e:
-        logger.error(f"获取知识节点API错误: {str(e)}")
+        logger.error(f"获取知识节点API错误: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="获取知识节点失败")
 
 
-@router.get("/nodes/{node_id}", response_model=KnowledgeNode)
+@router.get("/nodes/{node_id}", response_model=Dict[str, Any])
 async def get_knowledge_node(
     node_id: int,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取知识节点详情"""
+    """获取知识节点详情（包含领域信息）"""
     try:
-        query_request = GraphQueryRequest(
-            query_type="node_search",
-            search_term="",  # 将通过ID精确查找
-            limit=1
-        )
-
-        # 查询特定节点
+        # 查询特定节点，预加载领域映射
         from sqlalchemy import select
-        from app.models.knowledge import KnowledgeNode
+        from sqlalchemy.orm import selectinload
+        from app.models.knowledge import KnowledgeNode as KnowledgeNodeModel
+        from app.models.domain import NodeDomainMapping
 
         result = await db.execute(
-            select(KnowledgeNode).where(
-                and_(
-                    KnowledgeNode.id == node_id,
-                    KnowledgeNode.user_id == current_user.id
-                )
-            )
+            select(KnowledgeNodeModel)
+            .options(selectinload(KnowledgeNodeModel.domain_mappings).selectinload(NodeDomainMapping.domain))
+            .where(KnowledgeNodeModel.id == node_id)
         )
         node = result.scalar_one_or_none()
 
         if not node:
             raise HTTPException(status_code=404, detail="知识节点不存在")
 
+        # 返回包含领域信息的响应
+        return {
+            "id": node.id,
+            "name": node.name,
+            "type": node.node_type,
+            "properties": node.properties if node.properties else {},
+            "confidence": node.confidence if node.confidence is not None else 0.5,
+            "source": node.source_type,
+            "metadata": {},
+            "created_at": node.created_at.isoformat() if node.created_at else None,
+            "updated_at": node.updated_at.isoformat() if node.updated_at else None,
+            "domains": [
+                {
+                    "domain_code": mapping.domain.domain_code,
+                    "domain_name": mapping.domain.domain_name,
+                    "color": mapping.domain.color,
+                    "icon": mapping.domain.icon,
+                    "is_primary": mapping.is_primary,
+                    "confidence": mapping.confidence,
+                    "mapping_method": mapping.mapping_method
+                }
+                for mapping in node.domain_mappings
+            ] if hasattr(node, 'domain_mappings') else []
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取知识节点详情API错误: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="获取知识节点详情失败")
+
+
+@router.put("/nodes/{node_id}", response_model=KnowledgeNode)
+async def update_knowledge_node(
+    node_id: int,
+    update_data: EntityUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """更新知识节点"""
+    try:
+        from sqlalchemy import select, update
+        from app.models.knowledge import KnowledgeNode as KnowledgeNodeModel
+
+        # 检查节点是否存在
+        result = await db.execute(
+            select(KnowledgeNodeModel).where(KnowledgeNodeModel.id == node_id)
+        )
+        node = result.scalar_one_or_none()
+
+        if not node:
+            raise HTTPException(status_code=404, detail="知识节点不存在")
+
+        # 准备更新数据
+        update_dict = {}
+        if update_data.name is not None:
+            update_dict['name'] = update_data.name
+        if update_data.type is not None:
+            update_dict['node_type'] = update_data.type
+        if update_data.description is not None:
+            update_dict['description'] = update_data.description
+        if update_data.properties is not None:
+            update_dict['properties'] = update_data.properties
+
+        if update_dict:
+            update_dict['updated_at'] = datetime.utcnow()
+            
+            # 更新数据库
+            await db.execute(
+                update(KnowledgeNodeModel)
+                .where(KnowledgeNodeModel.id == node_id)
+                .values(**update_dict)
+            )
+            await db.commit()
+
+            # 同步更新Neo4j
+            try:
+                await knowledge_graph_service.update_node_in_neo4j(node_id, update_dict)
+            except Exception as neo4j_error:
+                logger.warning(f"Neo4j节点更新失败: {neo4j_error}")
+
+            # 重新查询更新后的节点
+            result = await db.execute(
+                select(KnowledgeNodeModel).where(KnowledgeNodeModel.id == node_id)
+            )
+            node = result.scalar_one()
+
         return node
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取知识节点详情API错误: {str(e)}")
-        raise HTTPException(status_code=500, detail="获取知识节点详情失败")
+        logger.error(f"更新知识节点API错误: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="更新知识节点失败")
+
+
+@router.delete("/nodes/{node_id}")
+async def delete_knowledge_node(
+    node_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """删除知识节点"""
+    try:
+        from sqlalchemy import select, delete
+        from app.models.knowledge import KnowledgeNode as KnowledgeNodeModel
+        from app.models.knowledge import KnowledgeRelation
+
+        # 检查节点是否存在
+        result = await db.execute(
+            select(KnowledgeNodeModel).where(KnowledgeNodeModel.id == node_id)
+        )
+        node = result.scalar_one_or_none()
+
+        if not node:
+            raise HTTPException(status_code=404, detail="知识节点不存在")
+
+        # 删除相关的关系
+        await db.execute(
+            delete(KnowledgeRelation).where(
+                (KnowledgeRelation.source_node_id == node_id) |
+                (KnowledgeRelation.target_node_id == node_id)
+            )
+        )
+
+        # 删除节点
+        await db.execute(
+            delete(KnowledgeNodeModel).where(KnowledgeNodeModel.id == node_id)
+        )
+        await db.commit()
+
+        # 同步删除Neo4j中的节点
+        try:
+            await knowledge_graph_service.delete_node_from_neo4j(node_id)
+        except Exception as neo4j_error:
+            logger.warning(f"Neo4j节点删除失败: {neo4j_error}")
+
+        return {"message": "知识节点删除成功", "node_id": node_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除知识节点API错误: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="删除知识节点失败")
 
 
 @router.get("/relations", response_model=List[KnowledgeRelationSummary])
@@ -318,7 +506,7 @@ async def get_knowledge_relations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取知识关系列表"""
+    """获取知识关系列表（已去重）"""
     try:
         query_request = GraphQueryRequest(
             query_type="relation_search",
@@ -335,6 +523,24 @@ async def get_knowledge_relations(
         )
 
         relations = result.get('relations', [])
+        
+        # 关系去重：使用 (source_id, target_id, type) 作为唯一键
+        unique_relations = {}
+        for relation in relations:
+            key = (
+                relation['source_node']['id'],
+                relation['target_node']['id'],
+                relation['type']
+            )
+            if key not in unique_relations:
+                unique_relations[key] = relation
+            else:
+                # 如果已存在，保留置信度更高的
+                if relation.get('confidence', 0) > unique_relations[key].get('confidence', 0):
+                    unique_relations[key] = relation
+        
+        logger.info(f"关系去重: 原始{len(relations)}条 -> 去重后{len(unique_relations)}条")
+        
         return [
             KnowledgeRelationSummary(
                 id=relation['id'],
@@ -344,12 +550,115 @@ async def get_knowledge_relations(
                 confidence=relation['confidence'],
                 created_at=relation['created_at']
             )
-            for relation in relations
+            for relation in unique_relations.values()
         ]
 
     except Exception as e:
         logger.error(f"获取知识关系API错误: {str(e)}")
         raise HTTPException(status_code=500, detail="获取知识关系失败")
+
+
+@router.put("/relations/{relation_id}", response_model=KnowledgeRelation)
+async def update_knowledge_relation(
+    relation_id: int,
+    update_data: RelationUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """更新知识关系"""
+    try:
+        from sqlalchemy import select, update
+        from app.models.knowledge import KnowledgeRelation as KnowledgeRelationModel
+
+        # 检查关系是否存在
+        result = await db.execute(
+            select(KnowledgeRelationModel).where(KnowledgeRelationModel.id == relation_id)
+        )
+        relation = result.scalar_one_or_none()
+
+        if not relation:
+            raise HTTPException(status_code=404, detail="知识关系不存在")
+
+        # 准备更新数据
+        update_dict = {}
+        if update_data.type is not None:
+            update_dict['relation_type'] = update_data.type
+        if update_data.properties is not None:
+            update_dict['properties'] = update_data.properties
+
+        if update_dict:
+            update_dict['updated_at'] = datetime.utcnow()
+            
+            # 更新数据库
+            await db.execute(
+                update(KnowledgeRelationModel)
+                .where(KnowledgeRelationModel.id == relation_id)
+                .values(**update_dict)
+            )
+            await db.commit()
+
+            # 同步更新Neo4j
+            try:
+                await knowledge_graph_service.update_relation_in_neo4j(relation_id, update_dict)
+            except Exception as neo4j_error:
+                logger.warning(f"Neo4j关系更新失败: {neo4j_error}")
+
+            # 重新查询更新后的关系
+            result = await db.execute(
+                select(KnowledgeRelationModel).where(KnowledgeRelationModel.id == relation_id)
+            )
+            relation = result.scalar_one()
+
+        return relation
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新知识关系API错误: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="更新知识关系失败")
+
+
+@router.delete("/relations/{relation_id}")
+async def delete_knowledge_relation(
+    relation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """删除知识关系"""
+    try:
+        from sqlalchemy import select, delete
+        from app.models.knowledge import KnowledgeRelation as KnowledgeRelationModel
+
+        # 检查关系是否存在
+        result = await db.execute(
+            select(KnowledgeRelationModel).where(KnowledgeRelationModel.id == relation_id)
+        )
+        relation = result.scalar_one_or_none()
+
+        if not relation:
+            raise HTTPException(status_code=404, detail="知识关系不存在")
+
+        # 删除关系
+        await db.execute(
+            delete(KnowledgeRelationModel).where(KnowledgeRelationModel.id == relation_id)
+        )
+        await db.commit()
+
+        # 同步删除Neo4j中的关系
+        try:
+            await knowledge_graph_service.delete_relation_from_neo4j(relation_id)
+        except Exception as neo4j_error:
+            logger.warning(f"Neo4j关系删除失败: {neo4j_error}")
+
+        return {"message": "知识关系删除成功", "relation_id": relation_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除知识关系API错误: {str(e)}")
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="删除知识关系失败")
 
 
 @router.get("/paths", response_model=GraphQueryResult)

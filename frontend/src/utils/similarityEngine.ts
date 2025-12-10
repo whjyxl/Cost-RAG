@@ -11,7 +11,6 @@ import {
   QualityFeatures,
   EstimateSuggestion,
   ConfidenceInterval,
-  AdjustmentFactor,
   ApplicabilityFactor,
   ProjectType,
   QualityLevel

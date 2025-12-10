@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Card,
   Typography,
@@ -20,6 +20,8 @@ import {
   Tabs,
   List,
   Tag,
+  Alert,
+  Spin,
   Tooltip,
 } from 'antd'
 import {
@@ -87,23 +89,24 @@ const ProfilePage: React.FC = () => {
   const [passwordForm] = Form.useForm()
   const [activeTab, setActiveTab] = useState('profile')
   const [loading, setLoading] = useState(false)
+  const [pageLoading, setPageLoading] = useState(true)
   const [passwordVisible, setPasswordVisible] = useState(false)
   const [avatarUrl, setAvatarUrl] = useState('')
 
   const [profile, setProfile] = useState<UserProfile>({
     id: '1',
-    username: 'zhang_engineer',
-    email: 'zhang.engineer@cost-rag.com',
-    phone: '+86 138 0013 8000',
-    fullName: '张工程师',
-    title: '高级造价工程师',
-    department: '工程造价部',
-    company: 'Cost-RAG科技有限公司',
+    username: '',
+    email: '',
+    phone: '',
+    fullName: '',
+    title: '',
+    department: '',
+    company: '',
     avatar: '',
-    bio: '拥有10年工程造价经验，专注于住宅建筑和商业项目的成本估算与管理。熟悉各类工程计价软件和规范标准。',
-    location: '北京市朝阳区',
-    joinDate: '2022-03-15',
-    lastLogin: '2024-01-20 14:30:00',
+    bio: '',
+    location: '',
+    joinDate: '',
+    lastLogin: '',
     status: 'online',
     timezone: 'Asia/Shanghai',
     language: 'zh-CN',
@@ -116,6 +119,66 @@ const ProfilePage: React.FC = () => {
     password: '',
     confirmPassword: '',
   })
+
+  // 加载用户资料
+  useEffect(() => {
+    fetchUserProfile()
+  }, [])
+
+  const fetchUserProfile = async () => {
+    setPageLoading(true)
+    try {
+      const response = await fetch('/api/v1/user/profile')
+      if (response.ok) {
+        const data = await response.json()
+        const prefs = data.preferences || {}
+        setProfile({
+          id: data.id.toString(),
+          username: data.username || '',
+          email: data.email || '',
+          phone: data.phone || '',
+          fullName: data.full_name || '',
+          title: prefs.title || '',
+          department: prefs.department || '',
+          company: prefs.company || '',
+          avatar: data.avatar_url || '',
+          bio: prefs.bio || '',
+          location: prefs.location || '',
+          joinDate: data.created_at ? new Date(data.created_at).toLocaleDateString('zh-CN') : '',
+          lastLogin: data.last_login_at ? new Date(data.last_login_at).toLocaleString('zh-CN') : '',
+          status: 'online',
+          timezone: prefs.timezone || 'Asia/Shanghai',
+          language: prefs.language || 'zh-CN',
+          theme: prefs.theme || 'light',
+          emailNotifications: prefs.email_notifications !== false,
+          pushNotifications: prefs.push_notifications !== false,
+          weeklyReport: prefs.weekly_report !== false,
+          autoSave: prefs.auto_save !== false,
+          twoFactorAuth: prefs.two_factor_auth === true,
+          password: '',
+          confirmPassword: '',
+        })
+        form.setFieldsValue({
+          username: data.username,
+          email: data.email,
+          phone: data.phone,
+          fullName: data.full_name,
+          title: prefs.title,
+          department: prefs.department,
+          company: prefs.company,
+          location: prefs.location,
+          bio: prefs.bio,
+        })
+      } else {
+        message.error('加载个人资料失败')
+      }
+    } catch (error) {
+      console.error('加载个人资料失败:', error)
+      message.error('加载个人资料失败')
+    } finally {
+      setPageLoading(false)
+    }
+  }
 
   // 模拟活动日志
   const activityLogs: ActivityLog[] = [
@@ -192,11 +255,37 @@ const ProfilePage: React.FC = () => {
   const handleSaveProfile = async (values: any) => {
     setLoading(true)
     try {
-      // 模拟保存
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      setProfile(prev => ({ ...prev, ...values }))
-      message.success('个人资料已更新')
+      const response = await fetch('/api/v1/user/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          full_name: values.fullName,
+          email: values.email,
+          phone: values.phone,
+          title: values.title,
+          department: values.department,
+          company: values.company,
+          location: values.location,
+          bio: values.bio,
+          avatar_url: avatarUrl || profile.avatar,
+          timezone: profile.timezone,
+          language: profile.language,
+          theme: profile.theme,
+        }),
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        message.success('个人资料已更新')
+        await fetchUserProfile() // 重新加载资料
+      } else {
+        const error = await response.json()
+        message.error(error.detail || '更新失败')
+      }
     } catch (error) {
+      console.error('更新失败:', error)
       message.error('更新失败，请重试')
     } finally {
       setLoading(false)
@@ -207,11 +296,26 @@ const ProfilePage: React.FC = () => {
   const handleChangePassword = async (values: any) => {
     setLoading(true)
     try {
-      // 模拟密码修改
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      message.success('密码修改成功，请重新登录')
-      passwordForm.resetFields()
+      const response = await fetch('/api/v1/user/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          current_password: values.currentPassword,
+          new_password: values.newPassword,
+        }),
+      })
+      
+      if (response.ok) {
+        message.success('密码修改成功')
+        passwordForm.resetFields()
+      } else {
+        const error = await response.json()
+        message.error(error.detail || '密码修改失败')
+      }
     } catch (error) {
+      console.error('密码修改失败:', error)
       message.error('密码修改失败，请重试')
     } finally {
       setLoading(false)
@@ -457,9 +561,20 @@ const ProfilePage: React.FC = () => {
                 </Text>
                 <Switch
                   checked={profile.twoFactorAuth}
-                  onChange={(checked) => {
-                    setProfile(prev => ({ ...prev, twoFactorAuth: checked }))
-                    message.success(checked ? '双因素认证已启用' : '双因素认证已关闭')
+                  onChange={async (checked) => {
+                    try {
+                      const response = await fetch('/api/v1/user/preferences', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ two_factor_auth: checked }),
+                      })
+                      if (response.ok) {
+                        setProfile(prev => ({ ...prev, twoFactorAuth: checked }))
+                        message.success(checked ? '双因素认证已启用' : '双因素认证已关闭')
+                      }
+                    } catch (error) {
+                      message.error('设置失败')
+                    }
                   }}
                 />
               </div>
@@ -517,9 +632,20 @@ const ProfilePage: React.FC = () => {
                   </Space>
                   <Switch
                     checked={profile.emailNotifications}
-                    onChange={(checked) => {
-                      setProfile(prev => ({ ...prev, emailNotifications: checked }))
-                      message.success(checked ? '邮件通知已开启' : '邮件通知已关闭')
+                    onChange={async (checked) => {
+                      try {
+                        const response = await fetch('/api/v1/user/preferences', {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ email_notifications: checked }),
+                        })
+                        if (response.ok) {
+                          setProfile(prev => ({ ...prev, emailNotifications: checked }))
+                          message.success(checked ? '邮件通知已开启' : '邮件通知已关闭')
+                        }
+                      } catch (error) {
+                        message.error('设置失败')
+                      }
                     }}
                   />
                 </div>
@@ -534,9 +660,20 @@ const ProfilePage: React.FC = () => {
                   </Space>
                   <Switch
                     checked={profile.weeklyReport}
-                    onChange={(checked) => {
-                      setProfile(prev => ({ ...prev, weeklyReport: checked }))
-                      message.success(checked ? '周报已开启' : '周报已关闭')
+                    onChange={async (checked) => {
+                      try {
+                        const response = await fetch('/api/v1/user/preferences', {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ weekly_report: checked }),
+                        })
+                        if (response.ok) {
+                          setProfile(prev => ({ ...prev, weeklyReport: checked }))
+                          message.success(checked ? '周报已开启' : '周报已关闭')
+                        }
+                      } catch (error) {
+                        message.error('设置失败')
+                      }
                     }}
                   />
                 </div>
@@ -558,9 +695,20 @@ const ProfilePage: React.FC = () => {
                   </Space>
                   <Switch
                     checked={profile.pushNotifications}
-                    onChange={(checked) => {
-                      setProfile(prev => ({ ...prev, pushNotifications: checked }))
-                      message.success(checked ? '推送通知已开启' : '推送通知已关闭')
+                    onChange={async (checked) => {
+                      try {
+                        const response = await fetch('/api/v1/user/preferences', {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ push_notifications: checked }),
+                        })
+                        if (response.ok) {
+                          setProfile(prev => ({ ...prev, pushNotifications: checked }))
+                          message.success(checked ? '推送通知已开启' : '推送通知已关闭')
+                        }
+                      } catch (error) {
+                        message.error('设置失败')
+                      }
                     }}
                   />
                 </div>
@@ -582,9 +730,20 @@ const ProfilePage: React.FC = () => {
                   </Space>
                   <Switch
                     checked={profile.autoSave}
-                    onChange={(checked) => {
-                      setProfile(prev => ({ ...prev, autoSave: checked }))
-                      message.success(checked ? '自动保存已开启' : '自动保存已关闭')
+                    onChange={async (checked) => {
+                      try {
+                        const response = await fetch('/api/v1/user/preferences', {
+                          method: 'PUT',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ auto_save: checked }),
+                        })
+                        if (response.ok) {
+                          setProfile(prev => ({ ...prev, autoSave: checked }))
+                          message.success(checked ? '自动保存已开启' : '自动保存已关闭')
+                        }
+                      } catch (error) {
+                        message.error('设置失败')
+                      }
                     }}
                   />
                 </div>
@@ -630,6 +789,14 @@ const ProfilePage: React.FC = () => {
       />
     </Card>
   )
+
+  if (pageLoading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '400px' }}>
+        <Spin size="large" tip="加载中..." />
+      </div>
+    )
+  }
 
   return (
     <div>

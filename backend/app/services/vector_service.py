@@ -19,7 +19,26 @@ class VectorService:
     def __init__(self):
         self.client = None
         self.collection_name = "documents"
-        self.vector_size = 768  # text2vec-base-chinese的向量维度
+        self.vector_size = 1536  # 阿里DashScope text-embedding-v1/v2的向量维度
+
+    @staticmethod
+    def _to_list(vector) -> list:
+        """安全地将向量转换为list格式
+
+        Args:
+            vector: numpy数组、list或其他可迭代对象
+
+        Returns:
+            list: 转换后的列表
+        """
+        if isinstance(vector, list):
+            return vector
+        elif hasattr(vector, 'tolist'):
+            # numpy数组或torch张量
+            return vector.tolist()
+        else:
+            # 其他可迭代对象
+            return list(vector)
 
     async def connect(self) -> bool:
         """连接到Qdrant服务器"""
@@ -97,7 +116,8 @@ class VectorService:
             point_ids = []
 
             for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-                point_id = f"{document_id}_{i}"
+                # 生成唯一的整数ID（Qdrant要求）
+                point_id = document_id * 1000000 + i
 
                 # 构建点数据
                 point_data = {
@@ -113,7 +133,7 @@ class VectorService:
 
                 point = PointStruct(
                     id=point_id,
-                    vector=embedding.tolist(),
+                    vector=self._to_list(embedding),
                     payload=point_data
                 )
 
@@ -137,7 +157,7 @@ class VectorService:
         self,
         query_vector: np.ndarray,
         limit: int = 10,
-        score_threshold: float = 0.7,
+        score_threshold: float = 0.3,  # 降低默认阈值
         document_ids: Optional[List[int]] = None,
         filters: Optional[Dict[str, Any]] = None
     ) -> List[Dict[str, Any]]:
@@ -184,9 +204,10 @@ class VectorService:
                     search_filter = Filter(must=conditions)
 
             # 执行搜索
+            logger.info(f"Qdrant搜索参数: limit={limit}, score_threshold={score_threshold}, filters={filters}")
             search_result = self.client.search(
                 collection_name=self.collection_name,
-                query_vector=query_vector.tolist(),
+                query_vector=self._to_list(query_vector),
                 query_filter=search_filter,
                 limit=limit,
                 score_threshold=score_threshold,
@@ -195,6 +216,7 @@ class VectorService:
                     hnsw_ef=128
                 )
             )
+            logger.info(f"Qdrant搜索返回: {len(search_result)} 个结果")
 
             # 格式化结果
             results = []
@@ -288,7 +310,7 @@ class VectorService:
 
             search_result = self.client.search(
                 collection_name=self.collection_name,
-                query_vector=dummy_vector.tolist(),
+                query_vector=self._to_list(dummy_vector),
                 query_filter=search_filter,
                 limit=limit or 1000,
                 with_payload=True

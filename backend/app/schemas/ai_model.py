@@ -19,6 +19,30 @@ class ChatMessage(BaseModel):
     class Config:
         from_attributes = True
 
+    @validator('role')
+    def validate_role(cls, v: str) -> str:
+        """限制允许的角色取值"""
+        allowed_roles = {'user', 'assistant', 'system'}
+        if v not in allowed_roles:
+            raise ValueError("role 必须是 'user'、'assistant' 或 'system'")
+        return v
+
+    @validator('content', pre=True)
+    def normalize_and_validate_content(cls, v: Any) -> str:
+        """规范化并验证内容：
+        - 强制为字符串并去除首尾空白
+        - 移除常见开场白前缀 '这是一个'（若位于开头）
+        - 确保非空
+        """
+        if not isinstance(v, str):
+            raise ValueError("content 必须是字符串")
+        text = v.strip()
+        if text.startswith("这是一个"):
+            text = text[len("这是一个") :].strip()
+        if len(text) == 0:
+            raise ValueError("content 不能为空")
+        return text
+
 
 class ChatRequest(BaseModel):
     """对话请求模式"""

@@ -1,5 +1,8 @@
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit'
 import { User, LoginRequest, LoginResponse } from '@/types'
+import logger from '@/utils/logger'
+import { request, AxiosError } from '@/utils/request'
+import { ApiErrorResponse } from '@/types/api'
 
 interface AuthState {
   user: User | null
@@ -24,43 +27,44 @@ const initialState: AuthState = {
 }
 
 // 异步thunk actions
-export const loginUser = createAsyncThunk(
+export const loginUser = createAsyncThunk<LoginResponse, LoginRequest>(
   'auth/login',
-  async (credentials: LoginRequest, { rejectWithValue }) => {
+  async (credentials, { rejectWithValue }) => {
     try {
-      console.log('开始登录请求...', credentials.email)
+      logger.debug('开始登录请求...', credentials.email)
 
-      const response = await fetch('/api/v1/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(credentials),
-      })
-
-      const data = await response.json()
-      console.log('登录响应:', { status: response.status, hasToken: !!data.access_token })
-
-      if (!response.ok) {
-        throw new Error(data.message || '登录失败')
+      // 确保字段名正确：前端使用email字段，与后端保持一致
+      const requestData = {
+        email: credentials.email,
+        password: credentials.password,
+        remember_me: credentials.remember_me || false
       }
+
+      // 使用统一的API客户端
+      // request拦截器已经返回response.data，所以直接得到LoginResponse类型
+      const response = await request.post('/api/v1/auth/login', requestData)
+      const data = response as unknown as LoginResponse
+      logger.debug('登录响应:', { hasToken: !!data.access_token })
 
       // 保存到localStorage - 修复：无论是否记住我都保存token，否则用户无法正常使用
       if (data.access_token) {
         localStorage.setItem('accessToken', data.access_token)
-        console.log('Token已保存到localStorage')
+        logger.debug('Token已保存到localStorage')
       }
 
       localStorage.setItem('refreshToken', data.refresh_token || '')
       localStorage.setItem('lastLoginTime', Date.now().toString())
 
-      console.log('登录成功，用户信息:', data.user)
+      logger.info('登录成功，用户信息:', data.user)
       return data
-    } catch (error: any) {
-      console.error('登录失败:', error)
-      return rejectWithValue(
-        error.message || '登录失败，请重试'
-      )
+    } catch (error) {
+      logger.error('登录失败:', error)
+      const axiosError = error as AxiosError<ApiErrorResponse>
+      const errorMessage = 
+        axiosError.response?.data?.message ||
+        axiosError.message ||
+        '登录失败，请重试'
+      return rejectWithValue(errorMessage)
     }
   }
 )
@@ -69,15 +73,10 @@ export const logout = createAsyncThunk(
   'auth/logout',
   async (_, { rejectWithValue }) => {
     try {
-      await fetch('/api/v1/auth/logout', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('accessToken')}`,
-        },
-      })
+      await request.post('/api/v1/auth/logout')
     } catch (error) {
       // 即使logout API失败，也要清除本地数据
-      console.warn('Logout API failed:', error)
+      logger.warn('Logout API failed:', error)
     }
 
     // 清除localStorage
@@ -87,7 +86,7 @@ export const logout = createAsyncThunk(
   }
 )
 
-export const refreshAccessToken = createAsyncThunk(
+export const refreshAccessToken = createAsyncThunk<string, void>(
   'auth/refreshToken',
   async (_, { getState, rejectWithValue }) => {
     try {
@@ -98,36 +97,30 @@ export const refreshAccessToken = createAsyncThunk(
         throw new Error('No refresh token available')
       }
 
-      const response = await fetch('/api/v1/auth/refresh', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ refresh_token: refreshToken }),
+      const response = await request.post('/api/v1/auth/refresh', {
+        refresh_token: refreshToken
       })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Token刷新失败')
-      }
-
-      localStorage.setItem('accessToken', data.access_token)
-      return data.access_token
-    } catch (error: any) {
+      const data = response as unknown as { access_token: string }
+      const accessToken = data.access_token
+      localStorage.setItem('accessToken', accessToken)
+      return accessToken
+    } catch (error) {
       // 刷新token失败，清除认证信息
       localStorage.removeItem('accessToken')
       localStorage.removeItem('refreshToken')
       localStorage.removeItem('lastLoginTime')
 
-      return rejectWithValue(
-        error.message || 'Token刷新失败'
-      )
+      const axiosError = error as AxiosError<ApiErrorResponse>
+      const errorMessage = 
+        axiosError.response?.data?.message ||
+        axiosError.message ||
+        'Token刷新失败'
+      return rejectWithValue(errorMessage)
     }
   }
 )
 
-export const getCurrentUser = createAsyncThunk(
+export const getCurrentUser = createAsyncThunk<User, void>(
   'auth/getCurrentUser',
   async (_, { rejectWithValue }) => {
     try {
@@ -136,24 +129,16 @@ export const getCurrentUser = createAsyncThunk(
         throw new Error('No access token available')
       }
 
-      const response = await fetch('/api/v1/auth/me', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.message || '获取用户信息失败')
-      }
-
+      const response = await request.get('/api/v1/auth/me')
+      const data = response as unknown as User
       return data
-    } catch (error: any) {
-      return rejectWithValue(
-        error.message || '获取用户信息失败'
-      )
+    } catch (error) {
+      const axiosError = error as AxiosError<ApiErrorResponse>
+      const errorMessage = 
+        axiosError.response?.data?.message ||
+        axiosError.message ||
+        '获取用户信息失败'
+      return rejectWithValue(errorMessage)
     }
   }
 )

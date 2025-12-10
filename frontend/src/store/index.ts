@@ -5,6 +5,7 @@ import { estimatesApi } from './api/estimatesApi'
 import { comparisonsApi } from './api/comparisonsApi'
 import { queriesApi } from './api/queriesApi'
 import { knowledgeGraphApi } from './api/knowledgeGraphApi'
+import { templatesApi } from './api/templatesApi'
 
 // Slices
 import authSlice from './slices/authSlice'
@@ -20,6 +21,7 @@ export const store = configureStore({
     [comparisonsApi.reducerPath]: comparisonsApi.reducer,
     [queriesApi.reducerPath]: queriesApi.reducer,
     [knowledgeGraphApi.reducerPath]: knowledgeGraphApi.reducer,
+    [templatesApi.reducerPath]: templatesApi.reducer,
 
     // Feature slices
     auth: authSlice,
@@ -44,6 +46,7 @@ export const store = configureStore({
           'comparisonsApi',
           'queriesApi',
           'knowledgeGraphApi',
+          'templatesApi',
         ],
       },
     })
@@ -52,7 +55,8 @@ export const store = configureStore({
       .concat(estimatesApi.middleware)
       .concat(comparisonsApi.middleware)
       .concat(queriesApi.middleware)
-      .concat(knowledgeGraphApi.middleware),
+      .concat(knowledgeGraphApi.middleware)
+      .concat(templatesApi.middleware),
 })
 
 // 类型定义

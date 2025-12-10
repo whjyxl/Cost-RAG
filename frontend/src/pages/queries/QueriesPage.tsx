@@ -12,13 +12,8 @@ const QueriesPage: React.FC = () => {
   return (
     <div>
       <Routes>
-        <Route index element={
-          <div>
-            <Title level={2}>智能问答</Title>
-            <p>智能问答功能正在开发中...</p>
-          </div>
-        } />
-        <Route path="chat" element={<ChatPage />} />
+        <Route index element={<ChatPage />} />
+        <Route path="chat" element={<Navigate to="/queries" replace />} />
         <Route path="history" element={<QueryHistoryPage />} />
         <Route path="*" element={<Navigate to="/queries" replace />} />
       </Routes>

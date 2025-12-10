@@ -71,16 +71,16 @@ except RuntimeError:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理"""
     # 启动时执行
-    print("🚀 Cost-RAG API is starting up...")
-    print(f"📊 Database URL: {settings.DATABASE_URL}")
-    print(f"🔗 Redis URL: {settings.REDIS_URL}")
-    print(f"🧠 Qdrant URL: {settings.QDRANT_URL}")
-    print(f"🌐 Neo4j URL: {settings.NEO4J_URI}")
+    print("Cost-RAG API is starting up...")
+    print(f"Database URL: {settings.DATABASE_URL}")
+    print(f"Redis URL: {settings.REDIS_URL}")
+    print(f"Qdrant URL: {settings.QDRANT_URL}")
+    print(f"Neo4j URL: {settings.NEO4J_URI}")
 
     yield
 
     # 关闭时执行
-    print("🛑 Cost-RAG API is shutting down...")
+    print("Cost-RAG API is shutting down...")
 
 
 # 设置生命周期
@@ -102,9 +102,12 @@ async def root():
 @app.get("/health")
 async def health_check():
     """健康检查端点"""
+    from datetime import datetime
+    from datetime import timezone
+    
     return {
         "status": "healthy",
-        "timestamp": "2024-01-01T00:00:00Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": settings.APP_VERSION,
         "environment": "development" if settings.DEBUG else "production"
     }

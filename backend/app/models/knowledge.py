@@ -3,8 +3,7 @@
 """
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, JSON, Boolean, ForeignKey, Index
 from sqlalchemy.sql import func
-from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.orm import relationship, synonym
 from datetime import datetime, timezone
 
 from app.db.session import Base
@@ -16,12 +15,14 @@ class KnowledgeNode(Base):
     __tablename__ = "knowledge_nodes"
 
     id = Column(Integer, primary_key=True, index=True)
+    # user_id字段已移除 - 数据库表中不存在此列
+    # user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
     # 节点基本信息
     name = Column(String(500), nullable=False, index=True)
     node_type = Column(String(100), nullable=False, index=True)  # 材料、工艺、规范、项目等
     category = Column(String(100), nullable=True)  # 子分类
-    alias = Column(ARRAY(String), nullable=True)  # 别名
+    alias = Column(JSON, nullable=True)  # 别名（JSON数组，兼容SQLite和PostgreSQL）
 
     # 描述信息
     description = Column(Text, nullable=True)
@@ -29,7 +30,7 @@ class KnowledgeNode(Base):
     properties = Column(JSON, nullable=True)  # 属性信息
 
     # 向量数据
-    embedding_vector = Column(ARRAY(Float), nullable=True)  # 嵌入向量
+    embedding_vector = Column(JSON, nullable=True)  # 嵌入向量（JSON数组，兼容SQLite和PostgreSQL）
     embedding_model = Column(String(100), nullable=True)
     embedding_dimension = Column(Integer, nullable=True)
 
@@ -64,8 +65,14 @@ class KnowledgeNode(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_accessed_at = Column(DateTime(timezone=True), nullable=True)
 
+    # 别名,便于与Schema对齐
+    type = synonym('node_type')
+    source = synonym('source_type')
+
     # 关系
-    verified_user = relationship("User")
+    # user关系已移除 - user_id字段不存在
+    # user = relationship("User", foreign_keys=[user_id], backref="knowledge_nodes")
+    verified_user = relationship("User", foreign_keys=[verified_by])
     outgoing_relations = relationship(
         "KnowledgeRelation",
         foreign_keys="KnowledgeRelation.source_node_id",
@@ -110,6 +117,8 @@ class KnowledgeRelation(Base):
     __tablename__ = "knowledge_relations"
 
     id = Column(Integer, primary_key=True, index=True)
+    # user_id字段已移除 - 数据库表中不存在此列
+    # user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
 
     # 关系两端
     source_node_id = Column(Integer, ForeignKey("knowledge_nodes.id"), nullable=False, index=True)
@@ -157,10 +166,16 @@ class KnowledgeRelation(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
+    # 别名，便于与Schema对齐
+    type = synonym('relation_type')
+    source = synonym('source_type')
+
     # 关系
     source_node = relationship("KnowledgeNode", foreign_keys=[source_node_id], back_populates="outgoing_relations")
     target_node = relationship("KnowledgeNode", foreign_keys=[target_node_id], back_populates="incoming_relations")
-    verified_user = relationship("User")
+    # user关系已移除 - user_id字段不存在
+    # user = relationship("User", foreign_keys=[user_id], backref="knowledge_relations")
+    verified_user = relationship("User", foreign_keys=[verified_by])
 
     # 复合索引
     __table_args__ = (

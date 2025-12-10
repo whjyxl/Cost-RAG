@@ -59,6 +59,9 @@ import { request } from '../../utils/request'
 // 导入Embedding模型选择器
 import EmbeddingModelSelector from '../../components/EmbeddingModelSelector'
 
+// 导入AI模型状态指示器
+import AIModelStatusIndicator from '../../components/AIModelStatusIndicator'
+
 const { Title, Text, Paragraph } = Typography
 const { TextArea } = Input
 const { Option } = Select
@@ -134,12 +137,31 @@ interface SystemLog {
   source: string
 }
 
+// 提供商配置状态接口
+interface ProviderConfigStatus {
+  configured: boolean
+  enabled: boolean
+  maskedKey?: string
+  name: string
+}
+
 const SystemConfigPage: React.FC = () => {
   const [form] = Form.useForm()
   const [activeTab, setActiveTab] = useState('basic')
   const [loading, setLoading] = useState(false)
   const [testLoading, setTestLoading] = useState(false)
   const [embeddingConfig, setEmbeddingConfig] = useState<EmbeddingApiConfig>(DEFAULT_EMBEDDING_CONFIG)
+
+  // 存储各提供商的配置状态
+  const [providerStatuses, setProviderStatuses] = useState<Record<string, ProviderConfigStatus>>({
+    zhipuai: { configured: false, enabled: false, name: '智谱AI' },
+    moonshot: { configured: false, enabled: false, name: '月之暗面' },
+    dashscope: { configured: false, enabled: false, name: '阿里千问' },
+    baidu: { configured: false, enabled: false, name: '百度文心' },
+    deepseek: { configured: false, enabled: false, name: '深度求索' },
+    yi: { configured: false, enabled: false, name: '零一万物' },
+    spark: { configured: false, enabled: false, name: '科大讯飞星火' }
+  })
 
   const [config, setConfig] = useState<SystemConfig>({
     // 基本设置
@@ -216,123 +238,136 @@ const SystemConfigPage: React.FC = () => {
     embeddingConfig: DEFAULT_EMBEDDING_CONFIG
   })
 
-  // 模拟系统日志
-  const systemLogs: SystemLog[] = [
-    {
-      id: '1',
-      level: 'info',
-      message: '系统启动成功',
-      timestamp: '2024-01-20 09:00:00',
-      source: 'system',
-    },
-    {
-      id: '2',
-      level: 'info',
-      message: '数据库连接正常',
-      timestamp: '2024-01-20 09:00:05',
-      source: 'database',
-    },
-    {
-      id: '3',
-      level: 'warning',
-      message: '磁盘空间使用率达到 85%',
-      timestamp: '2024-01-20 10:30:00',
-      source: 'storage',
-    },
-    {
-      id: '4',
-      level: 'error',
-      message: '邮件服务连接失败',
-      timestamp: '2024-01-20 11:15:00',
-      source: 'email',
-    },
-    {
-      id: '5',
-      level: 'info',
-      message: '用户登录: zhang_engineer',
-      timestamp: '2024-01-20 14:30:00',
-      source: 'auth',
-    },
-  ]
+  // 系统日志状态
+  const [systemLogs, setSystemLogs] = useState<SystemLog[]>([])
+  const [logsLoading, setLogsLoading] = useState(false)
+
+  // 加载系统日志
+  const loadSystemLogs = async (level?: string, source?: string) => {
+    setLogsLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (level) params.append('level', level)
+      if (source) params.append('source', source)
+      params.append('limit', '100')
+      
+      const response = await request(`/api/v1/system/logs?${params.toString()}`, {
+        method: 'GET',
+      })
+      
+      if (response && response.success && response.data) {
+        setSystemLogs(response.data)
+      }
+    } catch (error) {
+      console.error('加载系统日志失败:', error)
+      message.error('加载系统日志失败')
+    } finally {
+      setLogsLoading(false)
+    }
+  }
+
+  // 加载Embedding配置
+  const loadEmbeddingConfig = async () => {
+    try {
+      console.log('开始加载Embedding配置...')
+      const response = await request('/api/v1/system-config/embedding', {
+        method: 'GET',
+      })
+      
+      if (response && response.success && response.data) {
+        const embeddingData = response.data
+        console.log('Embedding配置加载成功:', embeddingData)
+        
+        // 更新表单和状态
+        form.setFieldsValue({
+          embeddingProvider: embeddingData.provider || 'dashscope',
+          embeddingModel: embeddingData.model || 'text-embedding-v2',
+          embeddingApiKey: embeddingData.api_key || ''
+        })
+        
+        setConfig(prev => ({
+          ...prev,
+          embeddingProvider: embeddingData.provider || 'dashscope',
+          embeddingModel: embeddingData.model || 'text-embedding-v2',
+          embeddingApiKey: embeddingData.api_key || ''
+        }))
+      }
+    } catch (error) {
+      console.error('加载Embedding配置失败:', error)
+    }
+  }
 
   // 加载AI模型配置
   const loadAIModelConfig = async () => {
     try {
       console.log('开始加载AI模型配置...')
 
-      // 使用正确的API路径（保持v1前缀）
-      const response = await request('/api/v1/ai-models/', {
+      // 使用正确的API路径 - 获取AI提供商信息
+      const response = await request('/api/v1/ai-models/providers', {
         method: 'GET',
       })
 
       console.log('AI配置API响应:', response)
 
       // 适配后端返回的数据格式
-      if (response && response.success && response.data) {
-        const configs = response.data
-        console.log('配置数据:', configs)
+      // /api/v1/ai-models/providers 返回: { providers: {...}, configured_count: N, total_count: N }
+      if (response && response.providers) {
+        const providers = response.providers
+        console.log('提供商配置数据:', providers)
 
-        // 统一表单字段映射，使用下划线命名
-        const formValues = {}
+        // 更新每个提供商的配置状态
+        const newStatuses: Record<string, ProviderConfigStatus> = {}
 
-        // 设置智谱AI配置
-        if (configs.zhipuai && configs.zhipuai.api_key) {
-          formValues['zhipuai_api_key'] = configs.zhipuai.api_key
+        // 处理所有7个提供商
+        const providerKeys = ['zhipuai', 'moonshot', 'dashscope', 'baidu', 'deepseek', 'yi', 'spark']
+        const providerNames: Record<string, string> = {
+          zhipuai: '智谱AI',
+          moonshot: '月之暗面',
+          dashscope: '阿里千问',
+          baidu: '百度文心',
+          deepseek: '深度求索',
+          yi: '零一万物',
+          spark: '科大讯飞星火'
         }
 
-        // 设置月之暗面配置
-        if (configs.moonshot && configs.moonshot.api_key) {
-          formValues['moonshot_api_key'] = configs.moonshot.api_key
-        }
-
-        // 设置阿里千问配置（注意后端字段是qwen，前端显示是dashscope）
-        if (configs.qwen && configs.qwen.api_key) {
-          formValues['dashscope_api_key'] = configs.qwen.api_key
-        }
-
-        // 设置百度文心一言配置
-        if (configs.baidu && configs.baidu.api_key) {
-          formValues['baidu_api_key'] = configs.baidu.api_key
-        }
-
-        // 设置深度求索配置
-        if (configs.deepseek && configs.deepseek.api_key) {
-          formValues['deepseek_api_key'] = configs.deepseek.api_key
-        }
-
-        // 设置零一万物配置
-        if (configs.yi && configs.yi.api_key) {
-          formValues['yi_api_key'] = configs.yi.api_key
-        }
-
-        // 设置科大讯飞星火配置
-        if (configs.spark && configs.spark.api_key) {
-          formValues['spark_api_key'] = configs.spark.api_key
-        }
-
-        // 一次性设置所有表单字段
-        if (Object.keys(formValues).length > 0) {
-          console.log('设置表单字段:', formValues)
-          form.setFieldsValue(formValues)
-
-          // 同时更新config状态
-          setConfig(prev => ({
-            ...prev,
-            chineseModelConfig: {
-              ...prev.chineseModelConfig,
-              ...formValues
+        providerKeys.forEach(key => {
+          const providerData = providers[key]
+          if (providerData) {
+            newStatuses[key] = {
+              configured: providerData.configured || false,
+              enabled: providerData.enabled || false,
+              maskedKey: providerData.api_key || undefined,
+              name: providerNames[key]
             }
-          }))
-        }
+
+            if (providerData.configured) {
+              console.log(`${providerNames[key]}已配置, 脱敏密钥: ${providerData.api_key}`)
+            }
+          } else {
+            newStatuses[key] = {
+              configured: false,
+              enabled: false,
+              name: providerNames[key]
+            }
+          }
+        })
+
+        // 更新状态
+        setProviderStatuses(newStatuses)
+
+        console.log(`已配置 ${response.configured_count} / ${response.total_count} 个AI提供商`)
       }
     } catch (error) {
       console.error('加载AI配置失败:', error)
+      message.error('加载AI配置失败，请刷新页面重试')
     }
   }
 
   // 组件挂载时加载配置
   useEffect(() => {
     loadAIModelConfig()
+    loadEmbeddingConfig()
+    loadSystemLogs()
   }, [])
 
   // 保存配置
@@ -356,177 +391,126 @@ const SystemConfigPage: React.FC = () => {
 
       console.log('处理后的API配置:', apiConfigs)
 
-      // 保存智谱AI配置
+      // 构建统一的配置更新请求
+      const configUpdate: any = {}
+      let hasAnyConfig = false
+
+      // 收集所有有效的AI模型配置
       if (apiConfigs.zhipuai_api_key) {
-        try {
-          console.log('保存智谱AI配置...')
-          const response = await request('/api/v1/ai-models/zhipuai', {
-            method: 'PUT',
-            data: {
-              provider: 'zhipuai',
-              api_key: apiConfigs.zhipuai_api_key,
-              enabled: true,
-            },
-          });
-          console.log('智谱AI配置保存成功:', response)
-          successCount++;
-          message.success('智谱AI配置已保存');
-        } catch (error) {
-          failCount++;
-          console.error('保存智谱AI配置失败:', error);
-          const errorMsg = error?.response?.data?.detail || '保存智谱AI配置失败';
-          message.error(`保存智谱AI配置失败: ${errorMsg}`);
+        configUpdate.zhipuai = {
+          api_key: apiConfigs.zhipuai_api_key,
+          enabled: true
         }
+        hasAnyConfig = true
       }
 
-      // 保存月之暗面配置
       if (apiConfigs.moonshot_api_key) {
-        try {
-          console.log('保存月之暗面配置...')
-          const response = await request('/api/v1/ai-models/moonshot', {
-            method: 'PUT',
-            data: {
-              provider: 'moonshot',
-              api_key: apiConfigs.moonshot_api_key,
-              enabled: true,
-            },
-          });
-          console.log('月之暗面配置保存成功:', response)
-          successCount++;
-          message.success('月之暗面配置已保存');
-        } catch (error) {
-          failCount++;
-          console.error('保存月之暗面配置失败:', error);
-          const errorMsg = error?.response?.data?.detail || '保存月之暗面配置失败';
-          message.error(`保存月之暗面配置失败: ${errorMsg}`);
+        configUpdate.moonshot = {
+          api_key: apiConfigs.moonshot_api_key,
+          enabled: true
         }
+        hasAnyConfig = true
       }
 
-      // 保存阿里千问配置
       if (apiConfigs.dashscope_api_key) {
-        try {
-          console.log('保存阿里千问配置...')
-          const response = await request('/api/v1/ai-models/dashscope', {
-            method: 'PUT',
-            data: {
-              provider: 'dashscope',
-              api_key: apiConfigs.dashscope_api_key,
-              enabled: true,
-            },
-          });
-          console.log('阿里千问配置保存成功:', response)
-          successCount++;
-          message.success('阿里千问配置已保存');
-        } catch (error) {
-          failCount++;
-          console.error('保存阿里千问配置失败:', error);
-          const errorMsg = error?.response?.data?.detail || '保存阿里千问配置失败';
-          message.error(`保存阿里千问配置失败: ${errorMsg}`);
+        configUpdate.dashscope = {
+          api_key: apiConfigs.dashscope_api_key,
+          enabled: true
         }
+        hasAnyConfig = true
       }
 
-      // 保存百度文心一言配置
       if (apiConfigs.baidu_api_key) {
-        try {
-          console.log('保存百度文心一言配置...')
-          const response = await request('/api/v1/ai-models/baidu', {
-            method: 'PUT',
-            data: {
-              provider: 'baidu',
-              api_key: apiConfigs.baidu_api_key,
-              enabled: true,
-            },
-          });
-          console.log('百度文心一言配置保存成功:', response)
-          successCount++;
-          message.success('百度文心一言配置已保存');
-        } catch (error) {
-          failCount++;
-          console.error('保存百度文心一言配置失败:', error);
-          const errorMsg = error?.response?.data?.detail || '保存百度文心一言配置失败';
-          message.error(`保存百度文心一言配置失败: ${errorMsg}`);
+        configUpdate.baidu = {
+          api_key: apiConfigs.baidu_api_key,
+          enabled: true
         }
+        hasAnyConfig = true
       }
 
-      // 保存深度求索配置
       if (apiConfigs.deepseek_api_key) {
-        try {
-          console.log('保存深度求索配置...')
-          const response = await request('/api/v1/ai-models/deepseek', {
-            method: 'PUT',
-            data: {
-              provider: 'deepseek',
-              api_key: apiConfigs.deepseek_api_key,
-              enabled: true,
-            },
-          });
-          console.log('深度求索配置保存成功:', response)
-          successCount++;
-          message.success('深度求索配置已保存');
-        } catch (error) {
-          failCount++;
-          console.error('保存深度求索配置失败:', error);
-          const errorMsg = error?.response?.data?.detail || '保存深度求索配置失败';
-          message.error(`保存深度求索配置失败: ${errorMsg}`);
+        configUpdate.deepseek = {
+          api_key: apiConfigs.deepseek_api_key,
+          enabled: true
         }
+        hasAnyConfig = true
       }
 
-      // 保存零一万物配置
       if (apiConfigs.yi_api_key) {
-        try {
-          console.log('保存零一万物配置...')
-          const response = await request('/api/v1/ai-models/yi', {
-            method: 'PUT',
-            data: {
-              provider: 'yi',
-              api_key: apiConfigs.yi_api_key,
-              enabled: true,
-            },
-          });
-          console.log('零一万物配置保存成功:', response)
-          successCount++;
-          message.success('零一万物配置已保存');
-        } catch (error) {
-          failCount++;
-          console.error('保存零一万物配置失败:', error);
-          const errorMsg = error?.response?.data?.detail || '保存零一万物配置失败';
-          message.error(`保存零一万物配置失败: ${errorMsg}`);
+        configUpdate.yi = {
+          api_key: apiConfigs.yi_api_key,
+          enabled: true
         }
+        hasAnyConfig = true
       }
 
-      // 保存科大讯飞星火配置
       if (apiConfigs.spark_api_key) {
-        try {
-          console.log('保存科大讯飞星火配置...')
-          const response = await request('/api/v1/ai-models/spark', {
-            method: 'PUT',
-            data: {
-              provider: 'spark',
-              api_key: apiConfigs.spark_api_key,
-              enabled: true,
-            },
-          });
-          console.log('科大讯飞星火配置保存成功:', response)
-          successCount++;
-          message.success('科大讯飞星火配置已保存');
-        } catch (error) {
-          failCount++;
-          console.error('保存科大讯飞星火配置失败:', error);
-          const errorMsg = error?.response?.data?.detail || '保存科大讯飞星火配置失败';
-          message.error(`保存科大讯飞星火配置失败: ${errorMsg}`);
+        configUpdate.spark = {
+          api_key: apiConfigs.spark_api_key,
+          enabled: true
         }
+        hasAnyConfig = true
       }
 
-      // 显示总体保存结果
-      if (successCount > 0) {
-        console.log(`配置保存完成: ${successCount}个成功, ${failCount}个失败`)
-        message.success(`AI模型配置保存完成: ${successCount}个成功, ${failCount}个失败`);
+      // 一次性提交所有配置到统一端点
+      if (hasAnyConfig) {
+        try {
+          console.log('正在保存AI模型配置...', configUpdate)
+          const response = await request('/api/v1/ai-models/config', {
+            method: 'PUT',
+            data: configUpdate,
+          })
+          console.log('AI模型配置保存成功:', response)
 
-        // 保存成功后重新加载配置以确保UI显示最新数据
-        console.log('重新加载配置以更新UI...')
-        await loadAIModelConfig()
-      } else if (failCount === 0) {
-        message.info('没有需要保存的AI模型配置');
+          const updatedCount = response?.updated_fields?.length || 0
+          if (updatedCount > 0) {
+            message.success(`AI模型配置保存成功，更新了 ${updatedCount} 个配置项`)
+            successCount = updatedCount
+          } else {
+            message.info('AI模型配置未发生变化')
+          }
+
+          // 保存成功后重新加载配置以确保UI显示最新数据
+          console.log('重新加载配置以更新UI...')
+          await loadAIModelConfig()
+        } catch (error: any) {
+          failCount++
+          console.error('保存AI模型配置失败:', error)
+          const errorMsg = error?.response?.data?.detail || error?.message || '保存AI模型配置失败'
+          message.error(`保存AI模型配置失败: ${errorMsg}`)
+        }
+      } else {
+        message.info('没有需要保存的AI模型配置')
+      }
+
+      // 保存Embedding配置
+      if (values.embeddingProvider || values.embeddingModel || values.embeddingApiKey) {
+        try {
+          console.log('正在保存Embedding配置...')
+          const embeddingUpdate = {
+            provider: values.embeddingProvider || config.embeddingProvider,
+            model: values.embeddingModel || config.embeddingModel,
+            api_key: values.embeddingApiKey || config.embeddingApiKey,
+            config: config.embeddingConfig || {}
+          }
+          
+          const embeddingResponse = await request('/api/v1/system-config/embedding', {
+            method: 'PUT',
+            data: embeddingUpdate,
+          })
+          
+          if (embeddingResponse && embeddingResponse.success) {
+            console.log('Embedding配置保存成功:', embeddingResponse)
+            message.success('Embedding配置保存成功')
+            
+            // 重新加载配置
+            await loadEmbeddingConfig()
+          }
+        } catch (error: any) {
+          console.error('保存Embedding配置失败:', error)
+          const errorMsg = error?.response?.data?.detail || error?.message || '保存Embedding配置失败'
+          message.error(`保存Embedding配置失败: ${errorMsg}`)
+        }
       }
 
       // 保存其他系统配置（这里可以扩展其他配置的保存逻辑）
@@ -545,10 +529,77 @@ const SystemConfigPage: React.FC = () => {
   const handleTestConnection = async (type: string) => {
     setTestLoading(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      message.success(`${type}连接测试成功`);
-    } catch (error) {
-      message.error(`${type}连接测试失败`);
+      // 如果type是"国产大模型"，则测试所有已配置的提供商
+      if (type === '国产大模型') {
+        message.info('正在测试所有已配置的AI模型连接...')
+        let successCount = 0
+        let failCount = 0
+        const results: string[] = []
+
+        for (const [key, status] of Object.entries(providerStatuses)) {
+          if (status.configured) {
+            try {
+              const response = await request(`/api/v1/ai-models/test/${key}`, {
+                method: 'POST',
+              })
+              if (response && response.status === 'success') {
+                successCount++
+                results.push(`✓ ${status.name}: 连接成功`)
+              } else {
+                failCount++
+                results.push(`✗ ${status.name}: ${response?.error || '连接失败'}`)
+              }
+            } catch (error: any) {
+              failCount++
+              results.push(`✗ ${status.name}: ${error?.message || '连接失败'}`)
+            }
+          }
+        }
+
+        if (successCount > 0 && failCount === 0) {
+          message.success(`测试完成！所有${successCount}个已配置模型连接成功`)
+        } else if (successCount > 0) {
+          message.warning(`测试完成！${successCount}个成功，${failCount}个失败`)
+        } else {
+          message.error('所有已配置模型连接失败，请检查API密钥')
+        }
+
+        // 显示详细结果
+        console.log('测试结果:', results.join('\n'))
+      } else {
+        // 其他类型的测试（数据库、AI服务等）
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        message.success(`${type}连接测试成功`);
+      }
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.detail || error?.message || '连接测试失败'
+      message.error(`${type}连接测试失败: ${errorMsg}`);
+    } finally {
+      setTestLoading(false);
+    }
+  }
+
+  // 测试单个提供商连接
+  const handleTestProvider = async (providerKey: string) => {
+    const status = providerStatuses[providerKey]
+    if (!status.configured) {
+      message.warning(`请先配置${status.name}的API密钥`)
+      return
+    }
+
+    setTestLoading(true);
+    try {
+      const response = await request(`/api/v1/ai-models/test/${providerKey}`, {
+        method: 'POST',
+      })
+      if (response && response.status === 'success') {
+        message.success(`${status.name}连接测试成功！`)
+      } else {
+        message.error(`${status.name}连接测试失败: ${response?.error || '未知错误'}`)
+      }
+    } catch (error: any) {
+      const errorMsg = error?.response?.data?.detail || error?.message || '连接测试失败'
+      message.error(`${status.name}连接测试失败: ${errorMsg}`);
     } finally {
       setTestLoading(false);
     }
@@ -966,29 +1017,74 @@ const SystemConfigPage: React.FC = () => {
         <Row gutter={24}>
           <Col span={8}>
             <Form.Item
-              label="智谱AI密钥"
+              label={
+                <Space>
+                  <span>智谱AI密钥</span>
+                  {providerStatuses.zhipuai.configured ? (
+                    <Tag color="success" icon={<CheckCircleOutlined />}>已配置</Tag>
+                  ) : (
+                    <Tag color="error" icon={<ExclamationCircleOutlined />}>未配置</Tag>
+                  )}
+                </Space>
+              }
               name="zhipuai_api_key"
               extra="GLM-4, GLM-3-Turbo等"
             >
-              <Input.Password placeholder="请输入智谱AI API密钥" />
+              <Input.Password
+                placeholder={
+                  providerStatuses.zhipuai.maskedKey
+                    ? `当前密钥: ${providerStatuses.zhipuai.maskedKey}`
+                    : "请输入智谱AI API密钥"
+                }
+              />
             </Form.Item>
           </Col>
           <Col span={8}>
             <Form.Item
-              label="月之暗面密钥"
+              label={
+                <Space>
+                  <span>月之暗面密钥</span>
+                  {providerStatuses.moonshot.configured ? (
+                    <Tag color="success" icon={<CheckCircleOutlined />}>已配置</Tag>
+                  ) : (
+                    <Tag color="error" icon={<ExclamationCircleOutlined />}>未配置</Tag>
+                  )}
+                </Space>
+              }
               name="moonshot_api_key"
               extra="Moonshot-v1-8k等"
             >
-              <Input.Password placeholder="请输入月之暗面API密钥" />
+              <Input.Password
+                placeholder={
+                  providerStatuses.moonshot.maskedKey
+                    ? `当前密钥: ${providerStatuses.moonshot.maskedKey}`
+                    : "请输入月之暗面API密钥"
+                }
+              />
             </Form.Item>
           </Col>
           <Col span={8}>
             <Form.Item
-              label="阿里千问密钥"
+              label={
+                <Space>
+                  <span>阿里千问密钥</span>
+                  {providerStatuses.dashscope.configured ? (
+                    <Tag color="success" icon={<CheckCircleOutlined />}>已配置</Tag>
+                  ) : (
+                    <Tag color="error" icon={<ExclamationCircleOutlined />}>未配置</Tag>
+                  )}
+                </Space>
+              }
               name="dashscope_api_key"
               extra="Qwen-Turbo, Qwen-Plus等"
             >
-              <Input.Password placeholder="请输入阿里千问API密钥" />
+              <Input.Password
+                placeholder={
+                  providerStatuses.dashscope.maskedKey
+                    ? `当前密钥: ${providerStatuses.dashscope.maskedKey}`
+                    : "请输入阿里千问API密钥"
+                }
+              />
             </Form.Item>
           </Col>
         </Row>
@@ -996,29 +1092,74 @@ const SystemConfigPage: React.FC = () => {
         <Row gutter={24}>
           <Col span={8}>
             <Form.Item
-              label="百度文心密钥"
+              label={
+                <Space>
+                  <span>百度文心密钥</span>
+                  {providerStatuses.baidu.configured ? (
+                    <Tag color="success" icon={<CheckCircleOutlined />}>已配置</Tag>
+                  ) : (
+                    <Tag color="error" icon={<ExclamationCircleOutlined />}>未配置</Tag>
+                  )}
+                </Space>
+              }
               name="baidu_api_key"
               extra="文心一言4.0等"
             >
-              <Input.Password placeholder="请输入百度文心API密钥" />
+              <Input.Password
+                placeholder={
+                  providerStatuses.baidu.maskedKey
+                    ? `当前密钥: ${providerStatuses.baidu.maskedKey}`
+                    : "请输入百度文心API密钥"
+                }
+              />
             </Form.Item>
           </Col>
           <Col span={8}>
             <Form.Item
-              label="深度求索密钥"
+              label={
+                <Space>
+                  <span>深度求索密钥</span>
+                  {providerStatuses.deepseek.configured ? (
+                    <Tag color="success" icon={<CheckCircleOutlined />}>已配置</Tag>
+                  ) : (
+                    <Tag color="error" icon={<ExclamationCircleOutlined />}>未配置</Tag>
+                  )}
+                </Space>
+              }
               name="deepseek_api_key"
               extra="DeepSeek-V2等"
             >
-              <Input.Password placeholder="请输入深度求索API密钥" />
+              <Input.Password
+                placeholder={
+                  providerStatuses.deepseek.maskedKey
+                    ? `当前密钥: ${providerStatuses.deepseek.maskedKey}`
+                    : "请输入深度求索API密钥"
+                }
+              />
             </Form.Item>
           </Col>
           <Col span={8}>
             <Form.Item
-              label="零一万物密钥"
+              label={
+                <Space>
+                  <span>零一万物密钥</span>
+                  {providerStatuses.yi.configured ? (
+                    <Tag color="success" icon={<CheckCircleOutlined />}>已配置</Tag>
+                  ) : (
+                    <Tag color="error" icon={<ExclamationCircleOutlined />}>未配置</Tag>
+                  )}
+                </Space>
+              }
               name="yi_api_key"
               extra="Yi-34B-Chat等"
             >
-              <Input.Password placeholder="请输入零一万物API密钥" />
+              <Input.Password
+                placeholder={
+                  providerStatuses.yi.maskedKey
+                    ? `当前密钥: ${providerStatuses.yi.maskedKey}`
+                    : "请输入零一万物API密钥"
+                }
+              />
             </Form.Item>
           </Col>
         </Row>
@@ -1026,11 +1167,26 @@ const SystemConfigPage: React.FC = () => {
         <Row gutter={24}>
           <Col span={8}>
             <Form.Item
-              label="科大讯飞星火密钥"
+              label={
+                <Space>
+                  <span>科大讯飞星火密钥</span>
+                  {providerStatuses.spark.configured ? (
+                    <Tag color="success" icon={<CheckCircleOutlined />}>已配置</Tag>
+                  ) : (
+                    <Tag color="error" icon={<ExclamationCircleOutlined />}>未配置</Tag>
+                  )}
+                </Space>
+              }
               name="spark_api_key"
               extra="讯飞星火3.5等"
             >
-              <Input.Password placeholder="请输入科大讯飞星火API密钥" />
+              <Input.Password
+                placeholder={
+                  providerStatuses.spark.maskedKey
+                    ? `当前密钥: ${providerStatuses.spark.maskedKey}`
+                    : "请输入科大讯飞星火API密钥"
+                }
+              />
             </Form.Item>
           </Col>
         </Row>
@@ -1216,54 +1372,68 @@ const SystemConfigPage: React.FC = () => {
       />
 
       <Row gutter={24}>
-        <Col span={12}>
+        <Col span={8}>
           <Form.Item
-            label="启用Embedding服务"
-            name="enableEmbedding"
-            valuePropName="checked"
+            label="Embedding供应商"
+            name="embeddingProvider"
+            rules={[{ required: true, message: '请选择Embedding供应商' }]}
           >
-            <Switch />
+            <Select 
+              placeholder="请选择供应商"
+              onChange={(value) => {
+                // 更新供应商时，清空模型选择
+                form.setFieldsValue({ embeddingModel: undefined })
+                setConfig(prev => ({
+                  ...prev,
+                  embeddingProvider: value,
+                  embeddingModel: ''
+                }))
+              }}
+            >
+              {CHINESE_EMBEDDING_PROVIDERS.map(provider => (
+                <Select.Option key={provider.id} value={provider.id}>
+                  {provider.name}
+                </Select.Option>
+              ))}
+            </Select>
           </Form.Item>
         </Col>
-        <Col span={12}>
+        <Col span={8}>
+          <Form.Item
+            label="Embedding模型"
+            name="embeddingModel"
+            rules={[{ required: true, message: '请选择Embedding模型' }]}
+          >
+            <Select 
+              placeholder="请先选择供应商"
+              disabled={!config.embeddingProvider}
+              onChange={(value) => {
+                setConfig(prev => ({
+                  ...prev,
+                  embeddingModel: value
+                }))
+              }}
+            >
+              {ALL_CHINESE_EMBEDDING_MODELS
+                .filter(model => model.provider === config.embeddingProvider)
+                .map(model => (
+                  <Select.Option key={model.id} value={model.id}>
+                    {model.name} ({model.dimensions}维)
+                  </Select.Option>
+                ))}
+            </Select>
+          </Form.Item>
+        </Col>
+        <Col span={8}>
           <Form.Item
             label="API密钥"
             name="embeddingApiKey"
+            rules={[{ required: true, message: '请输入API密钥' }]}
           >
-            <Input.Password placeholder="请输入Embedding API密钥" />
+            <Input.Password placeholder="请输入API密钥" />
           </Form.Item>
         </Col>
       </Row>
-
-      {/* Embedding模型选择器 */}
-      <Card size="small" title="Embedding模型选择" style={{ marginBottom: 16 }}>
-        <EmbeddingModelSelector
-          value={config.embeddingModel}
-          onChange={(modelId, provider) => {
-            // 更新配置
-            const newConfig = {
-              ...config,
-              embeddingModel: modelId,
-              embeddingProvider: provider
-            }
-            setConfig(newConfig)
-          }}
-          onConfigChange={(newEmbeddingConfig) => {
-            setEmbeddingConfig(newEmbeddingConfig)
-            // 同时更新到主配置中
-            const newConfig = {
-              ...config,
-              embeddingConfig: newEmbeddingConfig
-            }
-            setConfig(newConfig)
-          }}
-          showConfig={true}
-          showPricing={true}
-          showCapabilities={true}
-          showComparison={true}
-          groupByProvider={true}
-        />
-      </Card>
 
       {/* 当前选择的模型信息展示 */}
       <Card size="small" title="当前配置信息" style={{ marginBottom: 16 }}>

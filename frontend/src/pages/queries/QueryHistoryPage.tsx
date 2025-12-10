@@ -62,7 +62,7 @@ interface QueryHistory {
 }
 
 const QueryHistoryPage: React.FC = () => {
-  const [histories, setHistories] = useState<QueryHistory[]>([])
+  const [historyData, setHistoryData] = useState<QueryHistory[]>([])
   const [loading, setLoading] = useState(false)
   const [searchText, setSearchText] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
@@ -72,9 +72,53 @@ const QueryHistoryPage: React.FC = () => {
   const [detailVisible, setDetailVisible] = useState(false)
   const [selectedHistory, setSelectedHistory] = useState<QueryHistory | null>(null)
 
-  // 模拟数据
+  // 从API获取查询历史
+  const fetchHistory = async () => {
+    setLoading(true)
+    try {
+      const token = localStorage.getItem('accessToken')  // 修改为accessToken
+      const response = await fetch(`/api/v1/qa/history?page=1&size=100`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        // 转换API数据格式为组件需要的格式
+        const formattedData: QueryHistory[] = data.queries.map((q: any) => ({
+          id: q.query_id,
+          sessionTitle: q.question.substring(0, 20) + '...',
+          question: q.question,
+          answer: q.answer,
+          questionTime: new Date(q.timestamp).toLocaleString('zh-CN'),
+          answerTime: new Date(q.timestamp).toLocaleString('zh-CN'),
+          sessionMessages: 1,
+          rating: Math.floor(q.confidence_score * 5),
+          feedback: q.confidence_score > 0.7 ? 'positive' : 'negative',
+          relatedDocs: [],
+          category: q.query_type || '其他',
+          tokensUsed: Math.floor(q.processing_time * 100)
+        }))
+        setHistoryData(formattedData)
+      }
+    } catch (error) {
+      console.error('获取查询历史失败:', error)
+      message.error('获取查询历史失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
-    const mockData: QueryHistory[] = [
+    fetchHistory()
+  }, [])
+
+  // 删除模拟数据的useEffect，直接使用API数据
+  /*
+  useEffect(() => {
+    if (historyData.length === 0) {
+      const mockData: QueryHistory[] = [
       {
         id: '1',
         sessionTitle: '工程造价计算方法咨询',
@@ -146,20 +190,22 @@ const QueryHistoryPage: React.FC = () => {
         tokensUsed: 178,
       },
     ]
-    setHistories(mockData)
-  }, [])
+    setHistoryData(mockData)
+    }
+  }, [historyData.length])
+  */
 
   // 统计信息
   const stats = {
-    total: histories.length,
-    today: histories.filter(h => dayjs(h.questionTime).isSame(dayjs(), 'day')).length,
-    thisWeek: histories.filter(h => dayjs(h.questionTime).isSame(dayjs().subtract(1, 'week'), 'week')).length,
-    avgRating: histories.length > 0 ? (histories.reduce((sum, h) => sum + (h.rating || 0), 0) / histories.length).toFixed(1) : '0.0',
-    totalTokens: histories.reduce((sum, h) => sum + (h.tokensUsed || 0), 0),
+    total: historyData.length,
+    today: historyData.filter(h => dayjs(h.questionTime).isSame(dayjs(), 'day')).length,
+    thisWeek: historyData.filter(h => dayjs(h.questionTime).isSame(dayjs().subtract(1, 'week'), 'week')).length,
+    avgRating: historyData.length > 0 ? (historyData.reduce((sum, h) => sum + (h.rating || 0), 0) / historyData.length).toFixed(1) : '0.0',
+    totalTokens: historyData.reduce((sum, h) => sum + (h.tokensUsed || 0), 0),
   }
 
   // 过滤历史记录
-  const filteredHistories = histories.filter(history => {
+  const filteredHistories = historyData.filter(history => {
     // 搜索过滤
     const matchesSearch = !searchText ||
       history.question.toLowerCase().includes(searchText.toLowerCase()) ||
@@ -213,7 +259,7 @@ const QueryHistoryPage: React.FC = () => {
 
   // 删除记录
   const handleDelete = (id: string) => {
-    setHistories(prev => prev.filter(item => item.id !== id))
+    setHistoryData(prev => prev.filter(item => item.id !== id))
     message.success('查询记录已删除')
   }
 
@@ -231,7 +277,7 @@ const QueryHistoryPage: React.FC = () => {
       cancelText: '取消',
       okType: 'danger',
       onOk: () => {
-        setHistories(prev => prev.filter(item => !selectedRowKeys.includes(item.id)))
+        setHistoryData(prev => prev.filter(item => !selectedRowKeys.includes(item.id)))
         setSelectedRowKeys([])
         message.success('批量删除成功')
       },

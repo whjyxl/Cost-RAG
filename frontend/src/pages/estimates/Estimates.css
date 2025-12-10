@@ -1,0 +1,366 @@
+/* ========================================
+   成本估算页面 - 简洁现代设计
+   ======================================== */
+
+/* 页面容器 */
+.estimates-container {
+  min-height: calc(100vh - 64px);
+  background: #f5f7fa;
+  padding: 24px;
+}
+
+/* 页面标题 */
+.estimates-title {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* 统计卡片优化 */
+:global(.ant-card) {
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+:global(.ant-statistic-title) {
+  font-size: 13px;
+  color: #666;
+}
+
+:global(.ant-statistic-content) {
+  font-size: 24px;
+  font-weight: 600;
+}
+
+/* 金额显示 */
+.amount-display {
+  font-size: 28px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* 步骤指示器优化 */
+:global(.ant-steps-item-finish .ant-steps-item-icon) {
+  background-color: #667eea;
+  border-color: #667eea;
+}
+
+:global(.ant-steps-item-process .ant-steps-item-icon) {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-color: #667eea;
+}
+
+:global(.ant-steps-item-finish .ant-steps-item-tail::after) {
+  background-color: #667eea;
+}
+
+/* 表单优化 */
+:global(.ant-form-item-label > label) {
+  font-weight: 500;
+  color: #2c3e50;
+}
+
+:global(.ant-input),
+:global(.ant-input-number),
+:global(.ant-select-selector),
+:global(.ant-picker) {
+  border-radius: 8px;
+  border-color: #d9d9d9;
+}
+
+:global(.ant-input:focus),
+:global(.ant-input-number:focus),
+:global(.ant-input-number-focused),
+:global(.ant-select-focused .ant-select-selector),
+:global(.ant-picker:hover),
+:global(.ant-picker-focused) {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1);
+}
+
+/* 按钮样式 */
+:global(.ant-btn-primary) {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  border-radius: 8px;
+  font-weight: 500;
+  height: 36px;
+  transition: all 0.3s;
+}
+
+:global(.ant-btn-primary:hover) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+:global(.ant-btn-default) {
+  border-radius: 8px;
+  border-color: #d9d9d9;
+  height: 36px;
+}
+
+:global(.ant-btn-default:hover) {
+  border-color: #667eea;
+  color: #667eea;
+}
+
+/* 表格优化 */
+:global(.ant-table) {
+  border-radius: 12px;
+}
+
+:global(.ant-table-thead > tr > th) {
+  background: #fafafa;
+  font-weight: 600;
+  color: #2c3e50;
+  border-bottom: 2px solid #f0f0f0;
+}
+
+:global(.ant-table-tbody > tr:hover > td) {
+  background: rgba(102, 126, 234, 0.04);
+}
+
+/* 标签优化 */
+:global(.ant-tag) {
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  border: none;
+  font-weight: 500;
+}
+
+/* 进度条优化 */
+:global(.ant-progress-bg) {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* 描述列表优化 */
+:global(.ant-descriptions-title) {
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 16px;
+}
+
+:global(.ant-descriptions-item-label) {
+  font-weight: 500;
+  color: #666;
+}
+
+/* 模板卡片 */
+.template-card {
+  cursor: pointer;
+  transition: all 0.3s;
+  height: 100%;
+}
+
+.template-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.2);
+}
+
+.template-card.selected {
+  border: 2px solid #667eea;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.25);
+}
+
+/* 对比表格 */
+.comparison-table {
+  margin-top: 24px;
+}
+
+.comparison-table :global(.ant-table-cell) {
+  padding: 12px 16px;
+}
+
+.comparison-header {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  font-weight: 600;
+}
+
+/* 图表容器 */
+.chart-container {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  margin-bottom: 24px;
+}
+
+/* 一级分部行高亮 */
+.primary-section-row {
+  background-color: #e6f7ff !important;
+  font-weight: 600;
+}
+
+.primary-section-row:hover {
+  background-color: #bae7ff !important;
+}
+
+/* Tabs样式优化 */
+:global(.ant-tabs-tab) {
+  font-size: 16px;
+  padding: 12px 24px;
+  font-weight: 500;
+}
+
+:global(.ant-tabs-tab-active) {
+  font-weight: 600;
+}
+
+:global(.ant-tabs-ink-bar) {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* 智能推荐卡片 */
+.template-recommendation-card :global(.ant-list-item) {
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.3s;
+  background: white;
+}
+
+.template-recommendation-card :global(.ant-list-item:hover) {
+  border-color: #667eea;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+  transform: translateY(-2px);
+}
+
+.template-recommendation-card :global(.ant-list-item-meta-avatar) {
+  margin-right: 16px;
+}
+
+.template-recommendation-card :global(.ant-list-item-meta-title) {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+  margin-bottom: 8px;
+}
+
+.template-recommendation-card :global(.ant-list-item-meta-description) {
+  color: #666;
+}
+
+/* 快速估算表单 */
+.quick-estimate-form :global(.ant-form-item) {
+  margin-right: 16px;
+  margin-bottom: 8px;
+}
+
+.quick-estimate-form :global(.ant-form-inline .ant-form-item) {
+  margin-right: 16px;
+}
+
+/* 对比抽屉样式 */
+:global(.ant-drawer-title) {
+  font-size: 18px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+:global(.ant-drawer-body) {
+  padding: 24px;
+}
+
+/* 调整系数输入框 */
+:global(.ant-input-number-handler-wrap) {
+  opacity: 1;
+}
+
+:global(.ant-input-number-input) {
+  text-align: center;
+  font-weight: 600;
+}
+
+/* Alert样式优化 */
+:global(.ant-alert-info) {
+  border-radius: 8px;
+  border: 1px solid #91d5ff;
+  background: #e6f7ff;
+}
+
+:global(.ant-alert-success) {
+  border-radius: 8px;
+  border: 1px solid #b7eb8f;
+  background: #f6ffed;
+}
+
+/* 成本明细表格特殊样式 */
+:global(.ant-table-row-expand-icon-cell) {
+  padding: 8px 12px;
+}
+
+:global(.ant-table-expanded-row > td) {
+  background: #fafafa;
+}
+
+/* Switch开关样式 */
+:global(.ant-switch-checked) {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+/* Descriptions优化 */
+:global(.ant-descriptions-bordered .ant-descriptions-item-label) {
+  background: #fafafa;
+  font-weight: 600;
+}
+
+/* 统计卡片hover效果 */
+:global(.ant-statistic):hover {
+  transition: all 0.3s;
+}
+
+/* 模板信息预览卡片 */
+:global(.ant-alert-with-description .ant-alert-description) {
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+/* Empty状态优化 */
+:global(.ant-empty-description) {
+  color: #999;
+  font-size: 14px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .estimates-container {
+    padding: 16px;
+  }
+
+  .estimates-title {
+    font-size: 20px;
+  }
+
+  .amount-display {
+    font-size: 24px;
+  }
+
+  :global(.ant-statistic-content) {
+    font-size: 20px;
+  }
+
+  :global(.ant-tabs-tab) {
+    font-size: 14px;
+    padding: 8px 16px;
+  }
+
+  .quick-estimate-form :global(.ant-form-inline .ant-form-item) {
+    display: block;
+    margin-right: 0;
+    margin-bottom: 16px;
+  }
+
+  :global(.ant-drawer) {
+    width: 100% !important;
+  }
+}

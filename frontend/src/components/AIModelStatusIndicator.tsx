@@ -7,6 +7,7 @@ import {
   ReloadOutlined
 } from '@ant-design/icons'
 import { getAIModelStatus, testAIModel, AIModelStatus } from '@/services/aiModelStatusService'
+import logger from '@/utils/logger'
 
 const { Text } = Typography
 
@@ -35,7 +36,7 @@ const AIModelStatusIndicator: React.FC<AIModelStatusIndicatorProps> = ({
       setStatus(currentStatus || null)
       onStatusChange?.(currentStatus?.configured || false)
     } catch (error) {
-      console.error('加载模型状态失败:', error)
+      logger.error('加载模型状态失败:', error)
     }
   }
 

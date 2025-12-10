@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react'
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import React, { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Typography,
   Card,
@@ -8,188 +8,223 @@ import {
   Button,
   Table,
   Tag,
-  Spin,
   Space,
-  Select,
   Input,
-  DatePicker,
   Upload,
   message,
   Modal,
-  Progress,
   Statistic,
   Alert,
   Tabs,
-  Tooltip,
-  Badge,
-  Dropdown
+  Tooltip
 } from 'antd'
 import {
   UploadOutlined,
   DatabaseOutlined,
   SearchOutlined,
-  FilterOutlined,
   ReloadOutlined,
   DownloadOutlined,
   DeleteOutlined,
-  EyeOutlined,
-  EditOutlined,
   FileExcelOutlined,
   BarChartOutlined,
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
-  MoreOutlined,
-  HistoryOutlined
+  RocketOutlined,
+  HistoryOutlined,
+  SwapOutlined
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+
+// 使用正确的 API
 import {
-  HistoricalProject,
-  HistoricalProjectSearchParams,
-  ProjectType,
-  QualityLevel,
-  HistoricalProjectSource,
-  ValidationStatus
-} from '@/types'
-import {
-  useGetHistoricalProjectsQuery,
-  useLazyGetHistoricalProjectsQuery,
-  useDeleteHistoricalProjectMutation,
-  useBatchImportHistoricalProjectsMutation,
-  useGetHistoricalProjectStatisticsQuery,
-  useExportHistoricalProjectsMutation
-} from '@/store/api/estimatesApi'
-import { ExcelParser } from '@/utils/excelParser'
+  useGetTemplatesQuery,
+  useDeleteTemplateMutation,
+  useUploadExcelMutation,
+  ProjectTemplate,
+  ProjectTemplateCostItem
+} from '@/store/api/templatesApi'
+
+import './Estimates.css'
 
 const { Title, Text } = Typography
-const { RangePicker } = DatePicker
 const { Search } = Input
 const { TabPane } = Tabs
 
 const HistoricalDataPage: React.FC = () => {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('overview')
+  const [searchTerm, setSearchTerm] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
 
-  // 统计信息
+  // RTK Query hooks
   const {
-    data: statistics,
-    isLoading: statisticsLoading,
-    error: statisticsError
-  } = useGetHistoricalProjectStatisticsQuery()
+    data: templatesData,
+    isLoading,
+    error,
+    refetch
+  } = useGetTemplatesQuery({ page, size: pageSize, name: searchTerm || undefined })
 
-  // 历史项目列表
-  const [searchParams, setSearchParams] = useState<HistoricalProjectSearchParams>({
-    page: 1,
-    page_size: 10,
-    sort_by: 'created_at',
-    sort_order: 'desc'
-  })
-
-  const {
-    data: projectsData,
-    isLoading: projectsLoading,
-    error: projectsError,
-    refetch: refetchProjects
-  } = useGetHistoricalProjectsQuery(searchParams)
-
-  // Hooks
-  const [searchProjects] = useLazyGetHistoricalProjectsQuery()
-  const [deleteProject] = useDeleteHistoricalProjectMutation()
-  const [batchImport] = useBatchImportHistoricalProjectsMutation()
-  const [exportData] = useExportHistoricalProjectsMutation()
+  const [deleteTemplate] = useDeleteTemplateMutation()
+  const [uploadExcel, { isLoading: uploading }] = useUploadExcelMutation()
 
   // 状态管理
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [uploadModalVisible, setUploadModalVisible] = useState(false)
   const [uploadFileList, setUploadFileList] = useState<File[]>([])
-  const [uploading, setUploading] = useState(false)
 
-  // 过滤器状态
-  const [filters, setFilters] = useState({
-    searchTerm: '',
-    projectType: 'all' as string,
-    qualityLevel: 'all' as string,
-    dataSource: 'all' as string,
-    dateRange: null as any
-  })
+  // 估算历史记录状态
+  const [estimatesData, setEstimatesData] = useState<any>(null)
+  const [estimatesLoading, setEstimatesLoading] = useState(false)
+  const [estimatesPage, setEstimatesPage] = useState(1)
+  const [estimatesPageSize, setEstimatesPageSize] = useState(10)
 
-  useEffect(() => {
-    if (statistics) {
-      console.log('历史项目统计信息:', statistics)
-    }
-  }, [statistics])
-
-  const handleSearch = () => {
-    const params: HistoricalProjectSearchParams = {
-      ...searchParams,
-      page: 1
-    }
-
-    if (filters.searchTerm) {
-      params.query = filters.searchTerm
-    }
-
-    if (filters.projectType !== 'all') {
-      params.project_types = [filters.projectType as ProjectType]
-    }
-
-    if (filters.qualityLevel !== 'all') {
-      params.quality_levels = [filters.qualityLevel as QualityLevel]
-    }
-
-    if (filters.dataSource !== 'all') {
-      params.data_sources = [filters.dataSource as HistoricalProjectSource]
-    }
-
-    setSearchParams(params)
-  }
-
-  const handleResetFilters = () => {
-    setFilters({
-      searchTerm: '',
-      projectType: 'all',
-      qualityLevel: 'all',
-      dataSource: 'all',
-      dateRange: null
-    })
-    setSearchParams({
-      page: 1,
-      page_size: 10,
-      sort_by: 'created_at',
-      sort_order: 'desc'
-    })
-  }
-
+  // 上传处理
   const handleUpload = async () => {
     if (uploadFileList.length === 0) {
       message.error('请选择要上传的Excel文件')
       return
     }
 
-    setUploading(true)
+    // 检查认证 token
+    const token = localStorage.getItem('accessToken')
+    if (!token) {
+      message.error('登录已过期，请重新登录')
+      navigate('/login')
+      return
+    }
+
+    let successCount = 0
+    let failCount = 0
+
     try {
-      // 这里应该调用批量导入API
-      message.success(`成功导入 ${uploadFileList.length} 个文件`)
+      for (const file of uploadFileList) {
+        try {
+          const formData = new FormData()
+          formData.append('file', file)
+
+          await uploadExcel(formData).unwrap()
+          console.log(`文件 ${file.name} 上传成功`)
+          successCount++
+        } catch (error: any) {
+          console.error(`文件 ${file.name} 上传失败:`, error)
+          if (error?.status === 401) {
+            message.error('认证失败,请重新登录')
+            navigate('/login')
+            return
+          }
+          failCount++
+        }
+      }
+
+      if (successCount > 0) {
+        message.success(`成功上传 ${successCount} 个文件${failCount > 0 ? `，${failCount} 个失败` : ''}`)
+      } else {
+        message.error('所有文件上传失败')
+      }
+
       setUploadModalVisible(false)
       setUploadFileList([])
-      refetchProjects()
+      // RTK Query 会自动刷新数据
     } catch (error) {
-      message.error('导入失败')
-    } finally {
-      setUploading(false)
+      message.error('上传过程出错')
+      console.error('Upload error:', error)
     }
   }
 
-  const handleDelete = async (id: string) => {
+  // 获取估算历史记录
+  const fetchEstimatesHistory = async () => {
+    try {
+      setEstimatesLoading(true)
+      const token = localStorage.getItem('accessToken')
+      if (!token) {
+        message.error('登录已过期，请重新登录')
+        navigate('/login')
+        return
+      }
+
+      const response = await fetch(
+        `/api/v1/template-estimates/estimates?page=${estimatesPage}&size=${estimatesPageSize}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      )
+
+      if (!response.ok) {
+        throw new Error('获取估算历史记录失败')
+      }
+
+      const data = await response.json()
+      setEstimatesData(data)
+    } catch (error) {
+      message.error('获取估算历史记录失败')
+      console.error('Fetch estimates error:', error)
+    } finally {
+      setEstimatesLoading(false)
+    }
+  }
+
+  // 当切换到估算历史Tab时，获取数据
+  React.useEffect(() => {
+    if (activeTab === 'estimates') {
+      fetchEstimatesHistory()
+    }
+  }, [activeTab, estimatesPage, estimatesPageSize])
+
+  // 删除估算记录
+  const handleDeleteEstimate = async (estimateId: number, estimateName: string) => {
+    Modal.confirm({
+      title: '确认删除估算记录',
+      content: `确定要删除估算记录"${estimateName}"吗？此操作不可撤销。`,
+      okText: '确定删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          const token = localStorage.getItem('accessToken')
+          if (!token) {
+            message.error('登录已过期，请重新登录')
+            navigate('/login')
+            return
+          }
+
+          const response = await fetch(
+            `/api/v1/template-estimates/estimates/${estimateId}`,
+            {
+              method: 'DELETE',
+              headers: {
+                'Authorization': `Bearer ${token}`
+              }
+            }
+          )
+
+          if (!response.ok) {
+            const errorData = await response.json()
+            throw new Error(errorData.detail || '删除失败')
+          }
+
+          message.success('估算记录已成功删除')
+          // 刷新列表
+          fetchEstimatesHistory()
+        } catch (error: any) {
+          message.error(error.message || '删除估算记录失败')
+          console.error('Delete estimate error:', error)
+        }
+      }
+    })
+  }
+
+  // 删除处理
+  const handleDelete = async (id: number) => {
     Modal.confirm({
       title: '确认删除',
-      content: '确定要删除这个历史项目吗？此操作不可撤销。',
+      content: '确定要删除这个项目模板吗？此操作不可撤销。',
       okText: '确定',
       cancelText: '取消',
       onOk: async () => {
         try {
-          await deleteProject(id).unwrap()
+          await deleteTemplate(id).unwrap()
           message.success('删除成功')
-          refetchProjects()
         } catch (error) {
           message.error('删除失败')
         }
@@ -197,85 +232,144 @@ const HistoricalDataPage: React.FC = () => {
     })
   }
 
-  const handleExport = async (format: 'excel' | 'csv' | 'json') => {
-    try {
-      const blob = await exportData({
-        project_ids: selectedRowKeys.length > 0 ? selectedRowKeys as string[] : undefined,
-        format,
-        filters: searchParams
-      }).unwrap()
+  // "用于估算"按钮处理
+  const handleUseForEstimation = (template: ProjectTemplate) => {
+    navigate('/estimates/smart-estimate', {
+      state: {
+        referenceProject: {
+          id: template.id,
+          name: template.name,
+          area: template.area,
+          unit_cost: template.unit_cost,
+          total_cost: template.total_cost,
+          cost_items: template.cost_items
+        }
+      }
+    })
+  }
 
-      // 创建下载链接
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `历史项目数据.${format}`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
-
-      message.success('导出成功')
-    } catch (error) {
-      message.error('导出失败')
+  // "项目对比"按钮处理
+  const handleCompareProjects = () => {
+    if (selectedRowKeys.length < 2) {
+      message.warning('请至少选择2个项目进行对比')
+      return
     }
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case ValidationStatus.VALIDATED: return 'success'
-      case ValidationStatus.PENDING: return 'processing'
-      case ValidationStatus.NEEDS_REVIEW: return 'warning'
-      case ValidationStatus.REJECTED: return 'error'
-      default: return 'default'
+    if (selectedRowKeys.length > 5) {
+      message.warning('最多支持同时对比5个项目')
+      return
     }
+    // 导航到对比页面，传递选中的项目IDs
+    navigate(`/estimates/comparisons?project_ids=${selectedRowKeys.join(',')}`)
   }
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case ValidationStatus.VALIDATED: return '已验证'
-      case ValidationStatus.PENDING: return '待验证'
-      case ValidationStatus.NEEDS_REVIEW: return '需要审核'
-      case ValidationStatus.REJECTED: return '已拒绝'
-      default: return '未知'
-    }
+  // 14级成本明细展开渲染
+  const expandedRowRender = (record: ProjectTemplate) => {
+    // 按层级分组
+    const primaryItems = record.cost_items?.filter(item => item.is_primary_section) || []
+    const secondaryItems = record.cost_items?.filter(item => item.is_secondary_section) || []
+
+    // 组织层级数据
+    const hierarchicalData = primaryItems.map(primary => {
+      const children = secondaryItems.filter(
+        sec => sec.primary_section_code === primary.item_code
+      )
+      return {
+        ...primary,
+        children: children.length > 0 ? children : undefined
+      }
+    })
+
+    // 14级明细表格列定义
+    const detailColumns: ColumnsType<ProjectTemplateCostItem> = [
+      {
+        title: '代码',
+        dataIndex: 'item_code',
+        width: 100,
+        render: (code: string, item: ProjectTemplateCostItem) => (
+          <Text strong={item.is_primary_section} style={{
+            color: item.is_primary_section ? '#1890ff' : undefined
+          }}>
+            {code}
+          </Text>
+        )
+      },
+      {
+        title: '项目名称',
+        dataIndex: 'item_name',
+        width: 300,
+        render: (name: string, item: ProjectTemplateCostItem) => (
+          <Text strong={item.is_primary_section}>{name}</Text>
+        )
+      },
+      {
+        title: '单价(元/m²)',
+        dataIndex: 'unit_price',
+        width: 150,
+        align: 'right',
+        render: (price: number | null) =>
+          price !== null ? `¥${price.toFixed(2)}` : '-'
+      },
+      {
+        title: '合价(元)',
+        dataIndex: 'total_price',
+        width: 150,
+        align: 'right',
+        render: (price: number | null) =>
+          price !== null ? `¥${(price / 10000).toFixed(2)}万` : '-'
+      },
+      {
+        title: '类型',
+        dataIndex: 'item_type',
+        width: 100,
+        render: (type: string, item: ProjectTemplateCostItem) => {
+          if (item.is_primary_section) return <Tag color="blue">一级分部</Tag>
+          if (item.is_secondary_section) return <Tag>二级分项</Tag>
+          return <Tag color="default">明细</Tag>
+        }
+      }
+    ]
+
+    return (
+      <div style={{ padding: '16px', backgroundColor: '#fafafa' }}>
+        <Alert
+          message="14级成本明细"
+          description="展示该项目的完整成本结构：一级分部（1.0-14.0）和二级分项明细。第14项为总造价，等于前13项之和。"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        <Table
+          columns={detailColumns}
+          dataSource={hierarchicalData}
+          pagination={false}
+          size="small"
+          bordered
+          rowKey="id"
+          expandable={{
+            childrenColumnName: 'children',
+            defaultExpandAllRows: false,
+            indentSize: 20
+          }}
+          rowClassName={(record: ProjectTemplateCostItem) =>
+            record.is_primary_section ? 'primary-section-row' : ''
+          }
+        />
+      </div>
+    )
   }
 
-  const getSourceText = (source: string) => {
-    switch (source) {
-      case HistoricalProjectSource.EXCEL_UPLOAD: return 'Excel上传'
-      case HistoricalProjectSource.MANUAL_ENTRY: return '手动录入'
-      case HistoricalProjectSource.API_IMPORT: return 'API导入'
-      default: return '未知'
-    }
-  }
-
-  const getSourceColor = (source: string) => {
-    switch (source) {
-      case HistoricalProjectSource.EXCEL_UPLOAD: return 'blue'
-      case HistoricalProjectSource.MANUAL_ENTRY: return 'green'
-      case HistoricalProjectSource.API_IMPORT: return 'purple'
-      default: return 'default'
-    }
-  }
-
-  const getQualityColor = (score: number) => {
-    if (score >= 90) return '#52c41a'
-    if (score >= 70) return '#faad14'
-    return '#ff4d4f'
-  }
-
-  const columns: ColumnsType<HistoricalProject> = [
+  // 表格列定义
+  const columns: ColumnsType<ProjectTemplate> = [
     {
       title: '项目名称',
       dataIndex: 'name',
       key: 'name',
-      render: (text: string, record: HistoricalProject) => (
+      render: (text: string, record: ProjectTemplate) => (
         <Space direction="vertical" size="small">
           <Text strong>{text}</Text>
-          {record.excel_metadata && (
+          {record.source_file && (
             <Text type="secondary" style={{ fontSize: '12px' }}>
-              来源: {record.excel_metadata.filename}
+              来源: {record.source_file}
             </Text>
           )}
         </Space>
@@ -283,79 +377,51 @@ const HistoricalDataPage: React.FC = () => {
     },
     {
       title: '项目类型',
-      dataIndex: ['project_features', 'basic_features', 'project_type'],
+      dataIndex: 'project_type',
       key: 'project_type',
-      render: (type: ProjectType) => {
-        const typeMap = {
-          [ProjectType.RESIDENTIAL]: { text: '住宅', color: 'blue' },
-          [ProjectType.COMMERCIAL]: { text: '商业', color: 'green' },
-          [ProjectType.INDUSTRIAL]: { text: '工业', color: 'orange' },
-          [ProjectType.PUBLIC]: { text: '公共', color: 'purple' },
-          [ProjectType.MIXED]: { text: '混合', color: 'cyan' }
+      render: (type: string | null) => {
+        if (!type) return <Tag>未分类</Tag>
+        const typeMap: Record<string, { text: string; color: string }> = {
+          'residential': { text: '住宅', color: 'blue' },
+          'commercial': { text: '商业', color: 'green' },
+          'industrial': { text: '工业', color: 'orange' },
+          'public': { text: '公共', color: 'purple' },
+          'mixed': { text: '混合', color: 'cyan' }
         }
-        const config = typeMap[type] || { text: '其他', color: 'default' }
+        const config = typeMap[type] || { text: type, color: 'default' }
         return <Tag color={config.color}>{config.text}</Tag>
       }
     },
     {
       title: '建筑面积',
-      dataIndex: ['project_features', 'basic_features', 'area'],
+      dataIndex: 'area',
       key: 'area',
       render: (area: number) => `${area.toLocaleString()} ㎡`
     },
     {
       title: '单位造价',
-      dataIndex: ['project_features', 'cost_features', 'unit_cost'],
+      dataIndex: 'unit_cost',
       key: 'unit_cost',
-      render: (cost: number) => `¥${cost.toLocaleString()}/㎡`
+      render: (cost: number | null) =>
+        cost !== null ? `¥${cost.toLocaleString()}/㎡` : '-'
     },
     {
       title: '总造价',
-      dataIndex: ['project_features', 'cost_features', 'total_cost'],
+      dataIndex: 'total_cost',
       key: 'total_cost',
-      render: (cost: number) => `¥${(cost / 10000).toFixed(2)}万`
+      render: (cost: number | null) =>
+        cost !== null ? `¥${(cost / 10000).toFixed(2)}万` : '-'
     },
     {
       title: '质量等级',
-      dataIndex: ['project_features', 'quality_features', 'quality_level'],
-      key: 'quality_level',
-      render: (level: QualityLevel) => {
-        const levelMap = {
-          [QualityLevel.BASIC]: { text: '基础', color: 'green' },
-          [QualityLevel.STANDARD]: { text: '标准', color: 'blue' },
-          [QualityLevel.PREMIUM]: { text: '高端', color: 'gold' }
-        }
-        const config = levelMap[level] || { text: '未知', color: 'default' }
-        return <Tag color={config.color}>{config.text}</Tag>
+      key: 'quality',
+      render: (_, record: ProjectTemplate) => {
+        // 根据单位造价估算质量等级
+        const unitCost = record.unit_cost || 0
+        if (unitCost >= 3000) return <Tag color="gold">高端</Tag>
+        if (unitCost >= 2000) return <Tag color="blue">标准</Tag>
+        return <Tag color="green">基础</Tag>
       }
-    },
-    {
-      title: '数据质量',
-      dataIndex: 'data_quality_score',
-      key: 'data_quality_score',
-      render: (score: number) => (
-        <Space direction="vertical" size="small">
-          <Progress
-            percent={score}
-            size="small"
-            strokeColor={getQualityColor(score)}
-            showInfo={false}
-          />
-          <Text style={{ fontSize: '12px', color: getQualityColor(score) }}>
-            {score.toFixed(1)}%
-          </Text>
-        </Space>
-      )
-    },
-    {
-      title: '验证状态',
-      dataIndex: ['quality_indicators', 'validation_status'],
-      key: 'validation_status',
-      render: (status: ValidationStatus) => (
-        <Tag color={getStatusColor(status)}>
-          {getStatusText(status)}
-        </Tag>
-      )
     },
     {
       title: '创建时间',
@@ -366,53 +432,27 @@ const HistoricalDataPage: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      render: (_, record: HistoricalProject) => (
+      render: (_, record: ProjectTemplate) => (
         <Space>
-          <Tooltip title="查看详情">
+          <Tooltip title="用于成本估算">
+            <Button
+              type="primary"
+              size="small"
+              icon={<RocketOutlined />}
+              onClick={() => handleUseForEstimation(record)}
+            >
+              用于估算
+            </Button>
+          </Tooltip>
+          <Tooltip title="删除">
             <Button
               type="text"
-              icon={<EyeOutlined />}
-              onClick={() => navigate(`/estimates/historical-data/${record.id}`)}
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              onClick={() => handleDelete(record.id)}
             />
           </Tooltip>
-          <Tooltip title="编辑">
-            <Button
-              type="text"
-              icon={<EditOutlined />}
-              onClick={() => navigate(`/estimates/historical-data/${record.id}/edit`)}
-            />
-          </Tooltip>
-          <Dropdown
-            menu={{
-              items: [
-                {
-                  key: 'export',
-                  label: '导出数据',
-                  icon: <DownloadOutlined />
-                },
-                {
-                  key: 'validate',
-                  label: '数据验证',
-                  icon: <CheckCircleOutlined />
-                },
-                {
-                  key: 'delete',
-                  label: '删除',
-                  icon: <DeleteOutlined />,
-                  danger: true
-                }
-              ],
-              onClick: ({ key }) => {
-                if (key === 'delete') {
-                  handleDelete(record.id)
-                } else if (key === 'export') {
-                  handleExport('excel')
-                }
-              }
-            }}
-          >
-            <Button type="text" icon={<MoreOutlined />} />
-          </Dropdown>
         </Space>
       )
     }
@@ -422,8 +462,7 @@ const HistoricalDataPage: React.FC = () => {
     selectedRowKeys,
     onChange: (newSelectedRowKeys: React.Key[]) => {
       setSelectedRowKeys(newSelectedRowKeys)
-    },
-    type: 'checkbox' as const
+    }
   }
 
   // 概览标签页内容
@@ -435,7 +474,7 @@ const HistoricalDataPage: React.FC = () => {
           <Card>
             <Statistic
               title="历史项目总数"
-              value={statistics?.total_projects || 0}
+              value={templatesData?.total || 0}
               prefix={<DatabaseOutlined />}
               valueStyle={{ color: '#1890ff' }}
             />
@@ -445,7 +484,7 @@ const HistoricalDataPage: React.FC = () => {
           <Card>
             <Statistic
               title="平均单位造价"
-              value={statistics?.average_unit_cost || 0}
+              value={templatesData?.templates?.reduce((sum, t) => sum + (t.unit_cost || 0), 0) / (templatesData?.templates?.length || 1) || 0}
               prefix="¥"
               suffix="/㎡"
               precision={2}
@@ -467,7 +506,7 @@ const HistoricalDataPage: React.FC = () => {
           <Card>
             <Statistic
               title="本周新增"
-              value={statistics?.recent_uploads?.length || 0}
+              value={0}
               prefix={<HistoryOutlined />}
               valueStyle={{ color: '#722ed1' }}
             />
@@ -476,131 +515,101 @@ const HistoricalDataPage: React.FC = () => {
       </Row>
 
       {/* 快速操作 */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col span={24}>
-          <Card title="快速操作">
-            <Space size="large" wrap>
-              <Button
-                type="primary"
-                icon={<UploadOutlined />}
-                size="large"
-                onClick={() => setUploadModalVisible(true)}
-              >
-                上传Excel文件
-              </Button>
-              <Button
-                icon={<SearchOutlined />}
-                onClick={() => navigate('/estimates/smart-estimate')}
-              >
-                智能估算
-              </Button>
-              <Button
-                icon={<BarChartOutlined />}
-                onClick={() => navigate('/estimates/analytics')}
-              >
-                数据分析
-              </Button>
-              <Button
-                icon={<DownloadOutlined />}
-                onClick={() => handleExport('excel')}
-                disabled={selectedRowKeys.length === 0}
-              >
-                导出选中数据
-              </Button>
-            </Space>
-          </Card>
-        </Col>
-      </Row>
+      <Card title="快速操作" style={{ marginBottom: 24 }}>
+        <Space size="large" wrap>
+          <Button
+            type="primary"
+            icon={<UploadOutlined />}
+            size="large"
+            onClick={() => setUploadModalVisible(true)}
+          >
+            上传Excel文件
+          </Button>
+          <Button
+            icon={<SearchOutlined />}
+            onClick={() => navigate('/estimates/smart-estimate')}
+          >
+            智能估算
+          </Button>
+          <Button
+            icon={<SwapOutlined />}
+            onClick={handleCompareProjects}
+            disabled={selectedRowKeys.length < 2}
+          >
+            项目对比 ({selectedRowKeys.length})
+          </Button>
+          <Button
+            icon={<BarChartOutlined />}
+            onClick={() => navigate('/estimates/analytics')}
+          >
+            数据分析
+          </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            disabled={selectedRowKeys.length === 0}
+          >
+            导出选中数据
+          </Button>
+        </Space>
+      </Card>
 
       {/* 最近上传的项目 */}
-      <Row gutter={[16, 16]}>
-        <Col span={24}>
-          <Card
-            title="最近上传的项目"
-            extra={
-              <Button type="link" onClick={() => navigate('/estimates/historical-data/list')}>
-                查看全部
-              </Button>
-            }
-          >
-            <Table
-              columns={columns.slice(0, 6)} // 只显示前6列
-              dataSource={statistics?.recent_uploads?.slice(0, 5) || []}
-              rowKey="id"
-              pagination={false}
-              size="small"
-            />
-          </Card>
-        </Col>
-      </Row>
+      <Card
+        title="最近上传的项目"
+        extra={
+          <Button type="link" onClick={() => setActiveTab('list')}>
+            查看全部
+          </Button>
+        }
+      >
+        <Table
+          columns={columns}
+          dataSource={templatesData?.templates?.slice(0, 5) || []}
+          rowKey="id"
+          pagination={false}
+          size="small"
+          expandable={{
+            expandedRowRender,
+            rowExpandable: (record) => (record.cost_items?.length || 0) > 0
+          }}
+        />
+      </Card>
     </div>
   )
 
   // 列表标签页内容
   const renderList = () => (
     <div>
-      {/* 过滤器 */}
+      {/* 搜索过滤器 */}
       <Card style={{ marginBottom: 24 }}>
         <Row gutter={[16, 16]} align="middle">
-          <Col xs={24} sm={12} md={16}>
-            <Space wrap>
-              <Search
-                placeholder="搜索项目名称..."
-                value={filters.searchTerm}
-                onChange={(e) => setFilters({ ...filters, searchTerm: e.target.value })}
-                style={{ width: 200 }}
-                allowClear
-              />
-              <Select
-                placeholder="项目类型"
-                value={filters.projectType}
-                onChange={(value) => setFilters({ ...filters, projectType: value })}
-                style={{ width: 120 }}
-                allowClear
-              >
-                <Select.Option value="all">全部类型</Select.Option>
-                <Select.Option value="residential">住宅</Select.Option>
-                <Select.Option value="commercial">商业</Select.Option>
-                <Select.Option value="industrial">工业</Select.Option>
-                <Select.Option value="public">公共</Select.Option>
-                <Select.Option value="mixed">混合</Select.Option>
-              </Select>
-              <Select
-                placeholder="质量等级"
-                value={filters.qualityLevel}
-                onChange={(value) => setFilters({ ...filters, qualityLevel: value })}
-                style={{ width: 120 }}
-                allowClear
-              >
-                <Select.Option value="all">全部等级</Select.Option>
-                <Select.Option value="basic">基础</Select.Option>
-                <Select.Option value="standard">标准</Select.Option>
-                <Select.Option value="premium">高端</Select.Option>
-              </Select>
-              <Select
-                placeholder="数据来源"
-                value={filters.dataSource}
-                onChange={(value) => setFilters({ ...filters, dataSource: value })}
-                style={{ width: 120 }}
-                allowClear
-              >
-                <Select.Option value="all">全部来源</Select.Option>
-                <Select.Option value="excel_upload">Excel上传</Select.Option>
-                <Select.Option value="manual_entry">手动录入</Select.Option>
-                <Select.Option value="api_import">API导入</Select.Option>
-              </Select>
-              <RangePicker
-                placeholder="选择时间范围"
-                onChange={(dates) => setFilters({ ...filters, dateRange: dates })}
-              />
-            </Space>
+          <Col xs={24} sm={16}>
+            <Search
+              placeholder="搜索项目名称..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              onSearch={() => setPage(1)}
+              style={{ width: '100%' }}
+              allowClear
+            />
           </Col>
-          <Col xs={24} sm={12} md={8} style={{ textAlign: 'right' }}>
+          <Col xs={24} sm={8} style={{ textAlign: 'right' }}>
             <Space>
-              <Button icon={<ReloadOutlined />} onClick={handleResetFilters}>
-                重置
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={() => {
+                  setSearchTerm('')
+                  setPage(1)
+                  refetch()
+                }}
+              >
+                刷新
               </Button>
-              <Button type="primary" icon={<SearchOutlined />} onClick={handleSearch}>
+              <Button
+                type="primary"
+                icon={<SearchOutlined />}
+                onClick={() => setPage(1)}
+              >
                 搜索
               </Button>
             </Space>
@@ -612,20 +621,25 @@ const HistoricalDataPage: React.FC = () => {
       <Card>
         <Table
           columns={columns}
-          dataSource={projectsData?.items || []}
+          dataSource={templatesData?.templates || []}
           rowKey="id"
-          loading={projectsLoading}
+          loading={isLoading}
           rowSelection={rowSelection}
+          expandable={{
+            expandedRowRender,
+            rowExpandable: (record) => (record.cost_items?.length || 0) > 0
+          }}
           pagination={{
-            current: searchParams.page,
-            pageSize: searchParams.page_size,
-            total: projectsData?.total || 0,
+            current: page,
+            pageSize: pageSize,
+            total: templatesData?.total || 0,
             showSizeChanger: true,
             showQuickJumper: true,
             showTotal: (total, range) =>
               `第 ${range[0]}-${range[1]} 条，共 ${total} 条`,
-            onChange: (page, pageSize) => {
-              setSearchParams({ ...searchParams, page, page_size: pageSize })
+            onChange: (newPage, newPageSize) => {
+              setPage(newPage)
+              setPageSize(newPageSize)
             }
           }}
           scroll={{ x: 1200 }}
@@ -634,10 +648,132 @@ const HistoricalDataPage: React.FC = () => {
     </div>
   )
 
+  // 渲染估算历史记录
+  const renderEstimatesHistory = () => {
+    const columns: ColumnsType<any> = [
+      {
+        title: 'ID',
+        dataIndex: 'id',
+        width: 80,
+        sorter: (a: any, b: any) => a.id - b.id
+      },
+      {
+        title: '估算名称',
+        dataIndex: 'name',
+        width: 300,
+        ellipsis: true
+      },
+      {
+        title: '估算类型',
+        dataIndex: 'estimation_type',
+        width: 120,
+        render: (type: string) => (
+          <Tag color={type === 'AI估算' ? 'blue' : 'green'}>{type}</Tag>
+        )
+      },
+      {
+        title: '参考模板',
+        dataIndex: 'template_name',
+        width: 200,
+        ellipsis: true
+      },
+      {
+        title: '总造价（万元）',
+        dataIndex: 'total_cost',
+        width: 150,
+        align: 'right',
+        render: (cost: number) => (cost / 10000).toFixed(2)
+      },
+      {
+        title: '单位造价（元/㎡）',
+        dataIndex: 'cost_per_unit',
+        width: 150,
+        align: 'right',
+        render: (cost: number) => cost?.toFixed(2) || '-'
+      },
+      {
+        title: '置信度',
+        dataIndex: 'confidence_score',
+        width: 120,
+        render: (score: number) => (
+          <span style={{ color: score > 0.7 ? '#52c41a' : score > 0.5 ? '#faad14' : '#ff4d4f' }}>
+            {(score * 100).toFixed(1)}%
+          </span>
+        )
+      },
+      {
+        title: '创建时间',
+        dataIndex: 'created_at',
+        width: 180,
+        render: (date: string) => new Date(date).toLocaleString('zh-CN')
+      },
+      {
+        title: '操作',
+        key: 'action',
+        width: 200,
+        fixed: 'right',
+        render: (_: any, record: any) => (
+          <Space>
+            <Button
+              type="link"
+              size="small"
+              icon={<BarChartOutlined />}
+              onClick={() => navigate(`/estimates/detail/${record.id}`)}
+            >
+              查看详情
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => handleDeleteEstimate(record.id, record.name)}
+            >
+              删除
+            </Button>
+          </Space>
+        )
+      }
+    ]
+
+    return (
+      <div>
+        <Card title="估算历史记录" extra={
+          <Space>
+            <Button icon={<ReloadOutlined />} onClick={fetchEstimatesHistory}>
+              刷新
+            </Button>
+          </Space>
+        }>
+          <Table
+            columns={columns}
+            dataSource={estimatesData?.estimates || []}
+            loading={estimatesLoading}
+            rowKey="id"
+            pagination={{
+              current: estimatesPage,
+              pageSize: estimatesPageSize,
+              total: estimatesData?.total || 0,
+              showSizeChanger: true,
+              showQuickJumper: true,
+              showTotal: (total, range) =>
+                `第 ${range[0]}-${range[1]} 条，共 ${total} 条`,
+              onChange: (newPage, newPageSize) => {
+                setEstimatesPage(newPage)
+                if (newPageSize) setEstimatesPageSize(newPageSize)
+              }
+            }}
+            scroll={{ x: 1400 }}
+          />
+        </Card>
+      </div>
+    )
+  }
+
   return (
     <div className="historical-data-page">
       <div className="page-header" style={{ marginBottom: 24 }}>
-        <Title level={2}>历史数据管理</Title>
+        <Title level={2} className="estimates-title">历史数据管理</Title>
         <Text type="secondary">管理历史项目数据，支持Excel导入和智能分析</Text>
       </div>
 
@@ -647,6 +783,9 @@ const HistoricalDataPage: React.FC = () => {
         </TabPane>
         <TabPane tab="项目列表" key="list">
           {renderList()}
+        </TabPane>
+        <TabPane tab="估算历史" key="estimates">
+          {renderEstimatesHistory()}
         </TabPane>
       </Tabs>
 
@@ -673,7 +812,7 @@ const HistoricalDataPage: React.FC = () => {
       >
         <Alert
           message="支持Excel格式"
-          description="请上传包含工程造价数据的Excel文件，系统将自动解析并提取项目信息。支持标准造价预算表、详细清单等多种格式。"
+          description="请上传包含工程造价数据的Excel文件，系统将自动解析并提取项目信息。支持多项目Excel格式（最多7个项目）。"
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
@@ -697,7 +836,7 @@ const HistoricalDataPage: React.FC = () => {
             return false // 阻止自动上传
           }}
           onChange={(info) => {
-            setUploadFileList(info.fileList.map(f => f.originFileObj as File))
+            setUploadFileList(info.fileList.map(f => f.originFileObj as File).filter(Boolean))
           }}
           showUploadList={true}
         >

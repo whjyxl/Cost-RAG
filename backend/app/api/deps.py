@@ -46,8 +46,14 @@ async def get_current_user(
         if payload is None:
             raise credentials_exception
 
-        user_id: int = payload.get("sub")
-        if user_id is None:
+        user_id_str = payload.get("sub")
+        if user_id_str is None:
+            raise credentials_exception
+        
+        # 将字符串ID转换为整数
+        try:
+            user_id = int(user_id_str)
+        except (ValueError, TypeError):
             raise credentials_exception
 
     except JWTError:
@@ -214,7 +220,7 @@ def get_pagination_params(
 
 
 class RateLimiter:
-    """简单的内存速率限制器"""
+    """简单的内存速率限制器（备用方案）"""
 
     def __init__(self):
         self.requests = {}
@@ -257,8 +263,71 @@ class RateLimiter:
         return True
 
 
+class RedisRateLimiter:
+    """基于Redis的分布式速率限制器"""
+
+    def __init__(self, redis_client):
+        self.redis = redis_client
+
+    async def is_allowed(
+        self,
+        key: str,
+        limit: int,
+        window: int
+    ) -> bool:
+        """
+        使用Redis滑动窗口算法检查是否允许请求
+
+        Args:
+            key: 限制键（通常是用户ID或IP）
+            limit: 限制数量
+            window: 时间窗口（秒）
+
+        Returns:
+            是否允许请求
+        """
+        import time
+
+        try:
+            now = time.time()
+            redis_key = f"rate_limit:{key}"
+            
+            # 使用Redis的sorted set实现滑动窗口
+            # 移除过期记录
+            await self.redis.zremrangebyscore(
+                redis_key, 0, now - window
+            )
+            
+            # 获取当前窗口内的请求数
+            count = await self.redis.zcard(redis_key)
+            
+            if count >= limit:
+                return False
+            
+            # 添加当前请求
+            await self.redis.zadd(redis_key, {str(now): now})
+            # 设置过期时间（窗口大小 + 1秒缓冲）
+            await self.redis.expire(redis_key, window + 1)
+            
+            return True
+        except Exception:
+            # Redis连接失败时，降级到内存限制器
+            return False
+
+
 # 全局速率限制器实例
-rate_limiter = RateLimiter()
+# 优先使用Redis，如果Redis不可用则使用内存版本
+memory_rate_limiter = RateLimiter()
+
+
+async def get_redis_rate_limiter():
+    """获取Redis速率限制器实例"""
+    try:
+        from app.db.session import get_redis
+        redis_client = await get_redis()
+        return RedisRateLimiter(redis_client)
+    except Exception:
+        return None
 
 
 async def rate_limit(
@@ -266,7 +335,7 @@ async def rate_limit(
     current_user: User = Depends(get_current_user)
 ):
     """
-    速率限制依赖项
+    速率限制依赖项（支持Redis分布式限流）
 
     Args:
         requests_per_minute: 每分钟请求数限制
@@ -276,12 +345,26 @@ async def rate_limit(
         HTTPException: 超过速率限制时抛出429错误
     """
     key = f"user:{current_user.id}"
-
-    if not rate_limiter.is_allowed(key, requests_per_minute, 60):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="请求过于频繁，请稍后再试"
-        )
+    window = 60  # 60秒窗口
+    
+    # 优先使用Redis分布式限流
+    redis_rate_limiter = await get_redis_rate_limiter()
+    
+    if redis_rate_limiter:
+        # 使用Redis限流
+        is_allowed = await redis_rate_limiter.is_allowed(key, requests_per_minute, window)
+        if not is_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="请求过于频繁，请稍后再试"
+            )
+    else:
+        # 降级到内存限流（单进程部署或Redis不可用时）
+        if not memory_rate_limiter.is_allowed(key, requests_per_minute, window):
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="请求过于频繁，请稍后再试"
+            )
 
 
 async def verify_file_size(
@@ -402,9 +485,47 @@ async def require_project_member(
     Raises:
         HTTPException: 非项目成员时抛出403错误
     """
-    # TODO: 实现项目成员检查逻辑
-    # 这里需要查询项目成员表来验证用户权限
-    return current_user
+    from sqlalchemy import select
+    from app.models.project import Project
+    
+    # 超级用户拥有所有权限
+    if current_user.is_superuser:
+        return current_user
+    
+    # 查询项目是否存在
+    result = await db.execute(
+        select(Project).where(Project.id == project_id)
+    )
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="项目不存在"
+        )
+    
+    # 检查用户是否是项目所有者
+    if project.owner_id == current_user.id:
+        return current_user
+    
+    # TODO: 未来可以扩展为项目成员表查询
+    # 例如：查询ProjectMember表，检查用户是否在成员列表中
+    # from app.models.project import ProjectMember
+    # member_result = await db.execute(
+    #     select(ProjectMember).where(
+    #         ProjectMember.project_id == project_id,
+    #         ProjectMember.user_id == current_user.id,
+    #         ProjectMember.is_active == True
+    #     )
+    # )
+    # if member_result.scalar_one_or_none():
+    #     return current_user
+    
+    # 非项目成员，拒绝访问
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="您不是此项目的成员，无权访问"
+    )
 
 
 # 文档访问权限检查

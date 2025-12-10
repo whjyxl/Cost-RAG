@@ -39,97 +39,93 @@ const AppLayout: React.FC = () => {
 
   const [mobileMenuVisible, setMobileMenuVisible] = useState(false)
 
+  // 检测是否处于预览模式
+  const isPreviewMode = location.pathname.startsWith('/preview')
+  const pathPrefix = isPreviewMode ? '/preview' : ''
+
   // 菜单配置
   const menuItems = [
     {
-      key: '/dashboard',
+      key: `${pathPrefix}/dashboard`,
       icon: <GlobalOutlined />,
       label: '行业资讯',
     },
     {
-      key: '/documents',
+      key: `${pathPrefix}/documents`,
       icon: <FileTextOutlined />,
       label: '文档管理',
       children: [
         {
-          key: '/documents/upload',
+          key: `${pathPrefix}/documents/upload`,
           label: '上传文档',
         },
         {
-          key: '/documents/list',
+          key: `${pathPrefix}/documents/list`,
           label: '文档列表',
         },
         {
-          key: '/documents/process',
+          key: `${pathPrefix}/documents/process`,
           label: '处理状态',
         },
         {
-          key: '/documents/knowledge-graph',
+          key: `${pathPrefix}/documents/knowledge-graph`,
           label: '知识图谱',
+        },
+        {
+          key: `${pathPrefix}/documents/nas-import`,
+          label: 'NAS导入',
         },
       ],
     },
     {
-      key: '/estimates',
+      key: `${pathPrefix}/estimates`,
       icon: <CalculatorOutlined />,
       label: '成本估算',
       children: [
         {
-          key: '/estimates/create',
-          label: '新建估算',
-        },
-        {
-          key: '/estimates/list',
-          label: '估算列表',
-        },
-        {
-          key: '/estimates/templates',
-          label: '估算模板',
-        },
-        {
-          key: '/estimates/historical-data',
-          label: '历史数据管理',
-        },
-        {
-          key: '/estimates/smart-estimate',
+          key: `${pathPrefix}/estimates/smart-estimate`,
           label: '智能估算',
         },
         {
-          key: '/estimates/comparisons',
+          key: `${pathPrefix}/estimates/historical-data`,
+          label: '历史数据管理',
+        },
+        {
+          key: `${pathPrefix}/estimates/comparisons`,
           label: '项目对比',
         },
       ],
     },
     {
-      key: '/queries',
+      key: `${pathPrefix}/queries`,
       icon: <QuestionCircleOutlined />,
       label: '智能问答',
       children: [
         {
-          key: '/queries/chat',
+          key: `${pathPrefix}/queries/chat`,
           label: '问答对话',
         },
         {
-          key: '/queries/history',
+          key: `${pathPrefix}/queries/history`,
           label: '查询历史',
         },
       ],
     },
     {
-      key: '/settings',
+      key: `${pathPrefix}/settings`,
       icon: <SettingOutlined />,
       label: '系统设置',
       children: [
         {
-          key: '/settings/profile',
+          key: `${pathPrefix}/settings/profile`,
           label: '个人资料',
         },
         {
-          key: '/settings/system',
+          key: `${pathPrefix}/settings/system`,
           label: '系统配置',
         },
         {
-          key: '/settings/api',
+          key: `${pathPrefix}/settings/api`,
           label: 'API管理',
         },
       ],
@@ -151,7 +147,7 @@ const AppLayout: React.FC = () => {
   const handleUserMenuClick = ({ key }: { key: string }) => {
     switch (key) {
       case 'profile':
-        navigate('/settings/profile')
+        navigate(`${pathPrefix}/settings/profile`)
         break
       case 'logout':
         dispatch(logout())
@@ -170,27 +166,27 @@ const AppLayout: React.FC = () => {
   // 快速导航菜单项
   const quickNavItems = [
     {
-      key: '/dashboard',
+      key: `${pathPrefix}/dashboard`,
       icon: <GlobalOutlined />,
       label: '行业资讯',
     },
     {
-      key: '/queries/chat',
+      key: `${pathPrefix}/queries/chat`,
       icon: <QuestionCircleOutlined />,
       label: '智能问答',
     },
     {
-      key: '/estimates/create',
+      key: `${pathPrefix}/estimates/create`,
       icon: <CalculatorOutlined />,
       label: '成本估算',
     },
     {
-      key: '/documents/upload',
+      key: `${pathPrefix}/documents/upload`,
       icon: <FileTextOutlined />,
       label: '文档上传',
     },
     {
-      key: '/settings/system',
+      key: `${pathPrefix}/settings/system`,
       icon: <SettingOutlined />,
       label: '系统设置',
     },

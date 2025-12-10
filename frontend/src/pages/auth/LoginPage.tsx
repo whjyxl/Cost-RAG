@@ -29,28 +29,9 @@ const LoginPage: React.FC = () => {
       <Content className="login-content">
         <div className="login-left">
           <div className="login-branding">
-            <div className="brand-logo">
-              <svg
-                width="80"
-                height="80"
-                viewBox="0 0 80 80"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <rect width="80" height="80" rx="20" fill="#2563eb" />
-                <path
-                  d="M40 20C30.0589 20 22 28.0589 22 40C22 51.9411 30.0589 60 40 60C49.9411 60 58 51.9411 58 40C58 28.0589 49.9411 20 40 20Z"
-                  fill="white"
-                />
-                <path
-                  d="M32 32H48V48H32V32Z"
-                  fill="#2563eb"
-                />
-              </svg>
+            <div className="brand-logo-text">
+              COST RAG
             </div>
-            <Title level={1} className="brand-title">
-              Cost-RAG
-            </Title>
             <Paragraph className="brand-subtitle">
               工程造价咨询智能RAG系统
             </Paragraph>
@@ -132,7 +113,10 @@ const LoginPage: React.FC = () => {
         </div>
 
         <div className="login-right">
-          <LoginForm onSuccess={() => {/* 登录成功后的处理 */}} />
+          <LoginForm
+            onSuccess={() => {/* 登录成功后的处理 */}}
+            showRegisterLink={true}
+          />
         </div>
       </Content>
     </Layout>

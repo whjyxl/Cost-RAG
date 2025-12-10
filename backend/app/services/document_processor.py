@@ -15,9 +15,9 @@ import fitz  # PyMuPDF
 from PIL import Image
 import markdown
 from bs4 import BeautifulSoup
-import textract
-from sentence_transformers import SentenceTransformer
-import numpy as np
+# import textract  # 暂时注释掉，避免安装问题
+# from sentence_transformers import SentenceTransformer  # 暂时注释掉，避免大型依赖
+# import numpy as np
 from app.core.config import settings
 from app.core.logging import logger
 
@@ -26,13 +26,38 @@ class DocumentProcessor:
     """文档处理器 - 支持多种格式的文档解析和向量化"""
 
     def __init__(self):
-        # 初始化向量化模型
-        self.embedding_model = SentenceTransformer('shibing624/text2vec-base-chinese')
+        # 初始化向量化模型 - 暂时禁用，避免大型依赖
+        # self.embedding_model = SentenceTransformer('shibing624/text2vec-base-chinese')
+        self.embedding_model = None  # 暂时设为None
         self.supported_formats = {
             '.pdf', '.docx', '.doc', '.txt', '.md', '.html', '.htm',
             '.xlsx', '.xls', '.csv', '.pptx', '.ppt', '.jpg', '.jpeg',
             '.png', '.gif', '.bmp', '.tiff'
         }
+
+    @staticmethod
+    def _to_list(vector):
+        """安全地将向量转换为list格式
+
+        Args:
+            vector: numpy数组、list或其他可迭代对象
+
+        Returns:
+            list或None
+        """
+        if vector is None:
+            return None
+        if isinstance(vector, list):
+            return vector
+        elif hasattr(vector, 'tolist'):
+            # numpy数组或torch张量
+            return vector.tolist()
+        else:
+            # 其他可迭代对象
+            try:
+                return list(vector)
+            except:
+                return None
 
     async def process_document(
         self,
@@ -86,7 +111,7 @@ class DocumentProcessor:
                 'chunk_count': len(chunks),
                 'metadata': metadata,
                 'chunks': chunks,
-                'embeddings': embeddings.tolist() if embeddings is not None else None,
+                'embeddings': embeddings,  # embeddings已经是List[List[float]]格式，不需要转换
                 'processing_status': 'success'
             }
 
@@ -126,8 +151,13 @@ class DocumentProcessor:
                 return await self._extract_excel_text(file_path)
             elif file_ext == '.csv':
                 return await self._extract_csv_text(file_path)
-            elif file_ext in ['.pptx', '.ppt']:
+            elif file_ext == '.pptx':
                 return await self._extract_pptx_text(file_path)
+            elif file_ext == '.ppt':
+                # 旧版PPT格式不支持，给出明确提示
+                raise ValueError(
+                    "不支持旧版.ppt格式。请使用PowerPoint将文件另存为.pptx格式后重新上传。"
+                )
             elif file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff']:
                 return await self._extract_image_text(file_path)
             else:
@@ -136,28 +166,76 @@ class DocumentProcessor:
             logger.error(f"文本提取失败 {file_path}: {str(e)}")
             raise
 
+    async def _validate_pdf_file(self, file_path: str) -> tuple[bool, str]:
+        """验证PDF文件是否可读
+
+        Returns:
+            (is_valid, error_message): 是否有效和错误消息
+        """
+        try:
+            # 使用PyMuPDF验证
+            doc = fitz.open(file_path)
+            page_count = doc.page_count
+            is_encrypted = doc.is_encrypted
+            doc.close()
+
+            if page_count == 0:
+                return False, "PDF文件没有页面"
+            if is_encrypted:
+                return False, "PDF文件已加密，无法处理"
+
+            logger.info(f"PDF验证通过: {page_count}页")
+            return True, ""
+
+        except Exception as e:
+            error_msg = str(e)
+            if "format" in error_msg.lower():
+                return False, f"PDF格式错误或文件损坏: {error_msg}"
+            elif "password" in error_msg.lower():
+                return False, "PDF文件需要密码"
+            else:
+                return False, f"PDF文件无法打开: {error_msg}"
+
     async def _extract_pdf_text(self, file_path: str) -> str:
         """提取PDF文本 - 使用PyMuPDF"""
+        # 先验证PDF文件
+        is_valid, error_msg = await self._validate_pdf_file(file_path)
+        if not is_valid:
+            raise ValueError(f"PDF验证失败: {error_msg}")
+
         try:
             doc = fitz.open(file_path)
             text = ""
             for page_num in range(doc.page_count):
                 page = doc[page_num]
-                text += page.get_text()
+                page_text = page.get_text()
+                text += page_text
+
             doc.close()
+
+            if not text.strip():
+                logger.warning(f"PDF文件 {file_path} 提取的文本为空，可能是扫描版PDF")
+
             return text.strip()
+
         except Exception as e:
-            logger.error(f"PDF文本提取失败: {str(e)}")
+            logger.error(f"PyMuPDF文本提取失败: {str(e)}", exc_info=True)
             # 备用方案：使用PyPDF2
             try:
+                logger.info("尝试使用PyPDF2作为备用方案")
                 with open(file_path, 'rb') as file:
                     pdf_reader = PyPDF2.PdfReader(file)
                     text = ""
                     for page in pdf_reader.pages:
                         text += page.extract_text()
+
+                if not text.strip():
+                    raise ValueError("PDF文本提取为空，可能是扫描版PDF或图片格式")
+
                 return text.strip()
-            except:
-                raise ValueError(f"无法解析PDF文件: {file_path}")
+            except Exception as backup_error:
+                logger.error(f"PyPDF2备用方案也失败: {str(backup_error)}", exc_info=True)
+                raise ValueError(f"无法解析PDF文件: PyMuPDF失败({str(e)}), PyPDF2失败({str(backup_error)})")
 
     async def _extract_docx_text(self, file_path: str) -> str:
         """提取Word文档文本"""
@@ -409,20 +487,92 @@ class DocumentProcessor:
 
         return chunks
 
-    async def _generate_embeddings(self, chunks: List[Dict[str, Any]]) -> Optional[np.ndarray]:
-        """生成文本向量"""
+    async def _generate_embeddings(self, chunks: List[Dict[str, Any]]) -> Optional[List[List[float]]]:
+        """生成文本向量 - 从数据库读取配置并使用对应的Embedding API"""
         try:
             if not chunks:
                 return None
 
-            texts = [chunk['content'] for chunk in chunks]
-            embeddings = self.embedding_model.encode(texts)
-
-            logger.info(f"生成 {len(embeddings)} 个向量，维度: {embeddings.shape[1]}")
-            return embeddings
+            # 从数据库读取embedding配置
+            from sqlalchemy import select
+            from app.models.system_config import SystemConfig
+            from app.db.session import AsyncSessionLocal
+            
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(SystemConfig).where(
+                        SystemConfig.category == "embedding",
+                        SystemConfig.is_active == True
+                    )
+                )
+                configs = result.scalars().all()
+                
+                # 解析配置
+                embedding_config = {}
+                for config in configs:
+                    key = config.config_key.replace("embedding_", "")
+                    embedding_config[key] = config.config_value
+            
+            provider = embedding_config.get('provider', 'dashscope')
+            model = embedding_config.get('model', 'text-embedding-v2')
+            api_key = embedding_config.get('api_key', '')
+            
+            if not api_key:
+                logger.error(f"Embedding API密钥未配置（供应商：{provider}）")
+                return None
+            
+            logger.info(f"使用Embedding配置 - 供应商：{provider}, 模型：{model}")
+            
+            # 根据供应商选择对应的API
+            if provider in ['dashscope', 'qwen']:
+                # 使用阿里DashScope
+                import dashscope
+                from dashscope import TextEmbedding
+                
+                dashscope.api_key = api_key
+                embeddings = []
+                
+                for chunk in chunks:
+                    content = chunk.get('content', '')
+                    if not content or len(content.strip()) == 0:
+                        embeddings.append([0.0] * 1536)
+                        continue
+                    
+                    try:
+                        # 根据模型名称选择对应的模型
+                        model_enum = TextEmbedding.Models.text_embedding_v2
+                        if 'v1' in model.lower():
+                            model_enum = TextEmbedding.Models.text_embedding_v1
+                        elif 'v3' in model.lower():
+                            model_enum = TextEmbedding.Models.text_embedding_v3
+                        
+                        response = TextEmbedding.call(
+                            model=model_enum,
+                            input=content[:2000]
+                        )
+                        
+                        if response.status_code == 200:
+                            embedding = response.output['embeddings'][0]['embedding']
+                            embeddings.append(embedding)
+                        else:
+                            logger.error(f"DashScope API调用失败: {response.message}")
+                            embeddings.append([0.0] * 1536)
+                            
+                    except Exception as e:
+                        logger.error(f"单个chunk向量生成失败: {str(e)}")
+                        embeddings.append([0.0] * 1536)
+                
+                logger.info(f"成功生成 {len(embeddings)} 个向量（使用{provider}/{model}）")
+                return embeddings
+            
+            else:
+                logger.error(f"不支持的Embedding供应商: {provider}")
+                return None
 
         except Exception as e:
             logger.error(f"向量生成失败: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
 
     async def get_supported_formats(self) -> List[str]:

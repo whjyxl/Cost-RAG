@@ -10,823 +10,1422 @@ import {
   InputNumber,
   Select,
   DatePicker,
-  Steps,
   Space,
   Alert,
   Spin,
   message,
   Table,
-  Tag,
   Progress,
   Statistic,
-  Collapse,
   Divider,
+  Empty,
   Tabs,
-  Modal,
-  Checkbox,
-  Rate
+  List,
+  Tooltip,
+  Switch,
+  Drawer,
+  Descriptions,
+  Tag
 } from 'antd'
 import {
   RobotOutlined,
-  SearchOutlined,
-  HistoryOutlined,
-  BulbOutlined,
-  BarChartOutlined,
-  CheckCircleOutlined,
-  ClockCircleOutlined,
-  DatabaseOutlined,
-  EyeOutlined,
-  DownloadOutlined,
-  ReloadOutlined,
   CalculatorOutlined,
-  SettingOutlined,
-  SelectOutlined
+  DownloadOutlined,
+  ApiOutlined,
+  WarningOutlined,
+  DatabaseOutlined,
+  SwapOutlined,
+  ThunderboltOutlined,
+  SaveOutlined
 } from '@ant-design/icons'
-import type { ColumnsType } from 'antd/es/table'
-import {
-  ProjectFeatures,
-  BasicFeatures,
-  CostFeatures,
-  QualityFeatures,
-  SimilarProjectRequest,
-  ProjectMatch,
-  EstimateSuggestion,
-  ProjectType,
-  QualityLevel,
-  MatchWeights,
-  HistoricalProject
-} from '@/types'
-import { SimilarityEngine } from '@/utils/similarityEngine'
-import { useLazyFindSimilarProjectsQuery } from '@/store/api/estimatesApi'
-import ProjectReferenceSelector from '@/components/estimates/ProjectReferenceSelector'
-import ProjectTemplateSelector from '@/components/estimates/ProjectTemplateSelector'
+import { useLocation } from 'react-router-dom'
+import * as XLSX from 'xlsx'
+
+import './Estimates.css'
+import { ProjectType, QualityLevel } from '@/types'
+import type { ProjectTemplate } from '@/store/api/templatesApi'
+import { useGetTemplatesQuery } from '@/store/api/templatesApi'
+import { post } from '@/utils/request'
+import SmartModelSelector from '@/components/SmartModelSelector'
+import type { LLMModel } from '@/config/models'
+import type { AIModelStatus } from '@/services/aiModelStatusService'
 
 const { Title, Text, Paragraph } = Typography
-const { Step } = Steps
-const { RangePicker } = DatePicker
-const { Panel } = Collapse
 const { TabPane } = Tabs
 
+// 地区系数预设
+const REGION_FACTORS: Record<string, number> = {
+  '北京': 1.2,
+  '上海': 1.15,
+  '深圳': 1.18,
+  '广州': 1.1,
+  '西安': 1.0,
+  '成都': 0.95,
+  '重庆': 0.93,
+  '武汉': 0.98,
+}
+
 const SmartEstimatePage: React.FC = () => {
+  const location = useLocation()
   const [form] = Form.useForm()
-  const [currentStep, setCurrentStep] = useState(0)
+  const [quickForm] = Form.useForm()
+
+  // 状态管理
   const [loading, setLoading] = useState(false)
-  const [projectFeatures, setProjectFeatures] = useState<ProjectFeatures | null>(null)
-  const [similarProjects, setSimilarProjects] = useState<ProjectMatch[]>([])
-  const [selectedProjects, setSelectedProjects] = useState<string[]>([])
-  const [matchWeights, setMatchWeights] = useState<MatchWeights>({
-    basic_weight: 0.3,
-    cost_weight: 0.4,
-    quality_weight: 0.2,
-    location_weight: 0.05,
-    temporal_weight: 0.05
-  })
+  const [activeTab, setActiveTab] = useState<'template' | 'ai'>('template')
+  const [expertMode, setExpertMode] = useState(false)
 
-  // 模板相关状态
-  const [selectedTemplate, setSelectedTemplate] = useState<HistoricalProject | null>(null)
-  const [templateApplied, setTemplateApplied] = useState(false)
+  // 当切换到AI估算标签时，自动填充默认值（解决输入法问题和字段验证冲突）
+  useEffect(() => {
+    if (activeTab === 'ai') {
+      // 为所有必填字段设置默认值
+      const currentValues = form.getFieldsValue()
+      const defaultValues: any = {}
 
-  const [findSimilarProjects] = useLazyFindSimilarProjectsQuery() // 修复JSX语法错误
+      if (!currentValues.project_name) {
+        defaultValues.project_name = 'AI智能估算项目'
+      }
+      if (!currentValues.project_type) {
+        defaultValues.project_type = ProjectType.RESIDENTIAL  // 默认住宅
+      }
+      if (!currentValues.building_type) {
+        defaultValues.building_type = '高层住宅'
+      }
+      if (!currentValues.area) {
+        defaultValues.area = 8000  // 默认8000平米
+      }
+      if (!currentValues.location) {
+        defaultValues.location = '北京市朝阳区'
+      }
+      if (!currentValues.quality_level) {
+        defaultValues.quality_level = QualityLevel.STANDARD  // 默认标准
+      }
 
-  const steps = [
-    {
-      title: '输入项目信息',
-      description: '填写项目基本信息，选择历史项目模板',
-      icon: <DatabaseOutlined />
-    },
-    {
-      title: '查看建议',
-      description: '基于历史数据生成估算建议',
-      icon: <BulbOutlined />
+      // 一次性设置所有默认值
+      if (Object.keys(defaultValues).length > 0) {
+        form.setFieldsValue(defaultValues)
+      }
     }
-  ]
+  }, [activeTab, form])
+
+  // 模板估算相关
+  const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null)
+  const [selectedTemplate, setSelectedTemplate] = useState<ProjectTemplate | null>(null)
+  const [templateEstimateResult, setTemplateEstimateResult] = useState<any>(null)
+  const [recommendedTemplates, setRecommendedTemplates] = useState<any[]>([])
+
+  // AI估算相关
+  const [aiEstimateResult, setAiEstimateResult] = useState<any>(null)
+  const [selectedModel, setSelectedModel] = useState<string | null>(null)
+  const [selectedModelInfo, setSelectedModelInfo] = useState<LLMModel | null>(null)
+  const [selectedModelStatus, setSelectedModelStatus] = useState<AIModelStatus | null>(null)
+  const [hasConfiguredModels, setHasConfiguredModels] = useState(true)
+
+  // 调整系数
+  const [regionFactor, setRegionFactor] = useState<number>(1.0)
+  const [qualityFactor, setQualityFactor] = useState<number>(1.0)
+
+  // 对比功能
+  const [comparisonList, setComparisonList] = useState<any[]>([])
+  const [showComparison, setShowComparison] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // RTK Query
+  const { data: templatesData } = useGetTemplatesQuery({ page: 1, size: 100 })
+
+  // 从历史数据页面导航过来时，接收referenceProject
+  const referenceProject = location.state?.referenceProject as ProjectTemplate | undefined
 
   useEffect(() => {
-    console.log('智能估算页面初始化')
-  }, [])
+    if (referenceProject) {
+      setSelectedTemplateId(referenceProject.id)
+      setSelectedTemplate(referenceProject)
+      form.setFieldsValue({
+        template_id: referenceProject.id,
+        project_name: `基于${referenceProject.name}的新项目`,
+        project_type: referenceProject.project_type || ProjectType.RESIDENTIAL,
+        area: referenceProject.area,
+        quality_level: QualityLevel.STANDARD
+      })
+      message.success(`已加载参考项目: ${referenceProject.name}`)
+    }
+  }, [referenceProject, form])
+
+  // 监听面积和项目类型变化，智能推荐模板
+  useEffect(() => {
+    const area = form.getFieldValue('area')
+    const projectType = form.getFieldValue('project_type')
+
+    if (area && projectType && templatesData?.templates) {
+      const recommended = templatesData.templates
+        .filter(t => {
+          const areaMatch = Math.abs(t.area - area) / area < 0.3 // 面积差异<30%
+          const typeMatch = !projectType || t.project_type === projectType
+          return areaMatch && typeMatch
+        })
+        .slice(0, 3)
+        .map(t => ({
+          ...t,
+          similarity_score: 1 - Math.abs(t.area - area) / area
+        }))
+
+      setRecommendedTemplates(recommended)
+    }
+  }, [form, templatesData])
 
   // 处理模板选择
-  const handleTemplateSelect = (template: HistoricalProject) => {
-    setSelectedTemplate(template)
-    setTemplateApplied(true)
+  const handleTemplateSelect = (templateId: number) => {
+    const template = templatesData?.templates?.find(t => t.id === templateId)
+    if (template) {
+      setSelectedTemplateId(templateId)
+      setSelectedTemplate(template)
 
-    // 将模板数据自动填充到表单中
-    const formData = {
-      project_name: template.project_name,
-      project_type: template.project_type,
-      building_type: template.building_type,
-      structure_type: template.structure_type,
-      area: template.area,
-      location: template.location,
-      floors: template.floors,
-      construction_year: template.year_built ? { year: () => template.year_built! } : undefined,
-      construction_period: template.construction_period,
-      quality_level: template.quality_level,
-      construction_standard: template.construction_standard,
-      design_standard: template.design_standard,
-      unit_cost: template.unit_cost
-    }
+      // 自动填充表单
+      form.setFieldsValue({
+        project_type: template.project_type,
+      })
 
-    form.setFieldsValue(formData)
-    message.success(`已应用模板: ${template.project_name}`)
-  }
-
-  const handleNext = async () => {
-    if (currentStep === 0) {
-      // 验证表单
-      try {
-        const values = await form.validateFields()
-        const features: ProjectFeatures = {
-          basic_features: {
-            project_type: values.project_type,
-            building_type: values.building_type,
-            structure_type: values.structure_type,
-            area: values.area,
-            location: values.location,
-            floors: values.floors,
-            year_built: values.construction_year?.year(),
-            construction_period: values.construction_period,
-            design_standard: values.design_standard
-          },
-          cost_features: {
-            total_cost: 0, // 将在后续步骤中计算
-            unit_cost: values.unit_cost || 0,
-            material_costs: [],
-            labor_costs: [],
-            equipment_costs: [],
-            overhead_costs: [],
-            other_costs: [],
-            cost_year: new Date().getFullYear(),
-            currency: 'CNY'
-          },
-          quality_features: {
-            quality_level: values.quality_level,
-            construction_standard: values.construction_standard,
-            technical_specifications: [],
-            material_grades: [],
-            quality_scores: []
-          }
-        }
-
-        setProjectFeatures(features)
-        // 搜索相似项目并跳转到查看建议步骤
-        await searchSimilarProjects()
-        setCurrentStep(1)
-      } catch (error) {
-        message.error('请填写完整的项目信息')
+      // 根据地点设置地区系数
+      // 这里简化处理，实际应该从template的location字段提取
+      const cityMatch = Object.keys(REGION_FACTORS).find(city =>
+        template.name?.includes(city)
+      )
+      if (cityMatch) {
+        setRegionFactor(REGION_FACTORS[cityMatch])
       }
-    } else if (currentStep === 1) {
-      // 完成估算
-      message.success('智能估算完成！')
-      // 这里可以保存估算结果或跳转到估算详情页
+
+      message.success(`已选择模板: ${template.name}`)
     }
   }
 
-  const handlePrev = () => {
-    setCurrentStep(currentStep - 1)
+  // 处理AI模型选择
+  const handleModelSelect = (model: LLMModel, status: AIModelStatus) => {
+    setSelectedModelInfo(model)
+    setSelectedModelStatus(status)
+    setHasConfiguredModels(status.configured && status.enabled)
   }
 
-  const searchSimilarProjects = async () => {
-    if (!projectFeatures) return
+  // 将前端provider映射到后端API provider
+  const getBackendProvider = (frontendProvider: string): string => {
+    const providerMap: Record<string, string> = {
+      'glm': 'zhipuai',
+      'kimi': 'moonshot',
+      'qwen': 'dashscope',
+      'wenxin': 'baidu',
+      'deepseek': 'deepseek',
+      'yi': 'yi',
+      'spark': 'spark'
+    }
+    return providerMap[frontendProvider] || frontendProvider
+  }
 
-    setLoading(true)
+  // 执行模板估算
+  const handleTemplateEstimate = async () => {
     try {
-      const request: SimilarProjectRequest = {
-        project_features: projectFeatures,
-        max_results: 10,
-        min_similarity_score: 0.3,
-        match_weights: matchWeights
+      const values = await form.validateFields()
+
+      if (!selectedTemplateId) {
+        message.error('请先选择参考模板')
+        return
       }
 
-      // 使用模拟数据进行演示
-      const mockMatches: ProjectMatch[] = [
-        {
-          historical_project: {
-            id: '1',
-            name: '阳光花园住宅项目',
-            source: 'excel_upload',
-            project_features: {
-              basic_features: {
-                project_type: projectFeatures.basic_features.project_type,
-                building_type: '高层住宅',
-                structure_type: '框架结构',
-                area: projectFeatures.basic_features.area * (0.9 + Math.random() * 0.2),
-                location: projectFeatures.basic_features.location,
-                floors: projectFeatures.basic_features.floors,
-                construction_period: 18,
-                design_standard: 'GB50000-2013'
-              },
-              cost_features: {
-                total_cost: 0,
-                unit_cost: projectFeatures.cost_features.unit_cost * (0.8 + Math.random() * 0.4),
-                material_costs: [],
-                labor_costs: [],
-                equipment_costs: [],
-                overhead_costs: [],
-                other_costs: [],
-                cost_year: 2023,
-                currency: 'CNY'
-              },
-              quality_features: {
-                quality_level: projectFeatures.quality_features.quality_level,
-                construction_standard: 'GB50300-2015',
-                technical_specifications: [],
-                material_grades: [],
-                quality_scores: []
-              }
-            },
-            similarity_result: {
-              overall_score: 0.85 + Math.random() * 0.1,
-              basic_similarity: 0.8 + Math.random() * 0.15,
-              cost_similarity: 0.85 + Math.random() * 0.1,
-              quality_similarity: 0.9 + Math.random() * 0.1,
-              location_similarity: 0.95,
-              temporal_similarity: 0.8,
-              match_factors: [],
-              confidence_level: 0.85,
-              explanation: '项目特征高度匹配，适合作为参考'
-            },
-            cost_estimates: [
-              {
-                cost_category: '土建工程',
-                suggested_unit_cost: projectFeatures.cost_features.unit_cost * (0.95 + Math.random() * 0.1),
-                confidence_interval: {
-                  lower_bound: projectFeatures.cost_features.unit_cost * 0.9,
-                  upper_bound: projectFeatures.cost_features.unit_cost * 1.1,
-                  confidence_level: 0.85
-                },
-                supporting_projects: ['阳光花园住宅项目'],
-                adjustment_factors: [],
-                rationale: '基于相似项目的历史数据调整得出'
-              }
-            ],
-            applicable_factors: []
-          }
-        },
-        {
-          historical_project: {
-            id: '2',
-            name: '商业中心改造项目',
-            source: 'manual_entry',
-            project_features: {
-              basic_features: {
-                project_type: projectFeatures.basic_features.project_type,
-                building_type: '商业综合体',
-                structure_type: '剪力墙结构',
-                area: projectFeatures.basic_features.area * (0.85 + Math.random() * 0.25),
-                location: projectFeatures.basic_features.location,
-                floors: projectFeatures.basic_features.floors + (Math.random() > 0.5 ? 2 : 0),
-                construction_period: 24,
-                design_standard: 'JGJ-2016'
-              },
-              cost_features: {
-                total_cost: 0,
-                unit_cost: projectFeatures.cost_features.unit_cost * (1.1 + Math.random() * 0.2),
-                material_costs: [],
-                labor_costs: [],
-                equipment_costs: [],
-                overhead_costs: [],
-                other_costs: [],
-                cost_year: 2024,
-                currency: 'CNY'
-              },
-              quality_features: {
-                quality_level: projectFeatures.quality_features.quality_level,
-                construction_standard: 'GB50300-2015',
-                technical_specifications: [],
-                material_grades: [],
-                quality_scores: []
-              }
-            },
-            similarity_result: {
-              overall_score: 0.75 + Math.random() * 0.1,
-              basic_similarity: 0.7 + Math.random() * 0.2,
-              cost_similarity: 0.8 + Math.random() * 0.15,
-              quality_similarity: 0.85 + Math.random() * 0.1,
-              location_similarity: 0.95,
-              temporal_similarity: 0.9,
-              match_factors: [],
-              confidence_level: 0.8,
-              explanation: '项目特征较为匹配，可适度参考'
-            },
-            cost_estimates: [
-              {
-                cost_category: '装饰工程',
-                suggested_unit_cost: projectFeatures.cost_features.unit_cost * (1.05 + Math.random() * 0.15),
-                confidence_interval: {
-                  lower_bound: projectFeatures.cost_features.unit_cost * 1.0,
-                  upper_bound: projectFeatures.cost_features.unit_cost * 1.2,
-                  confidence_level: 0.8
-                },
-                supporting_projects: ['商业中心改造项目'],
-                adjustment_factors: [],
-                rationale: '考虑商业项目的特殊要求和装饰标准'
-              }
-            ],
-            applicable_factors: []
-          }
-        }
-      ]
+      setLoading(true)
 
-      setSimilarProjects(mockMatches)
-    } catch (error) {
-      message.error('搜索相似项目失败')
+      const response = await post<any>('/api/v1/template-estimates/estimate', {
+        name: values.project_name,
+        project_type: values.project_type || selectedTemplate?.project_type,
+        area: values.area,
+        location: values.location,
+        start_date: values.construction_year?.format('YYYY'),
+        template_id: selectedTemplateId
+      })
+
+      console.log('🔍 [CRITICAL] API Response received:', response)
+      console.log('🔍 [CRITICAL] cost_breakdown exists?:', !!response.cost_breakdown)
+      console.log('🔍 [CRITICAL] cost_breakdown content:', response.cost_breakdown)
+      if (response.cost_breakdown?.secondary_sections) {
+        console.log('🔍 [CRITICAL] Secondary 2.1:', response.cost_breakdown.secondary_sections['2.1'])
+      }
+
+      // 应用前端的地区和质量调整系数
+      const adjustedUnitCost = response.unit_cost * regionFactor * qualityFactor
+      const adjustedTotalCost = adjustedUnitCost * values.area
+
+      const stateToSet = {
+        ...response,
+        unit_cost: adjustedUnitCost,
+        total_cost: adjustedTotalCost,
+        adjustment_factors: {
+          ...response.adjustment_factors,
+          region_factor: regionFactor,
+          quality_factor: qualityFactor
+        }
+      }
+
+      console.log('🔍 [CRITICAL] Setting state with cost_breakdown?:', !!stateToSet.cost_breakdown)
+      console.log('🔍 [CRITICAL] State to set:', stateToSet)
+
+      setTemplateEstimateResult(stateToSet)
+
+      message.success('模板估算完成')
+    } catch (error: any) {
+      console.error('Template estimate error:', error)
+      message.error(error?.response?.data?.detail || '模板估算失败')
     } finally {
       setLoading(false)
     }
   }
 
-  const getProjectTypeColor = (type: ProjectType) => {
-    const colors = {
-      [ProjectType.RESIDENTIAL]: 'blue',
-      [ProjectType.COMMERCIAL]: 'green',
-      [ProjectType.INDUSTRIAL]: 'orange',
-      [ProjectType.PUBLIC]: 'purple',
-      [ProjectType.MIXED]: 'cyan'
+  // 快速估算
+  const handleQuickEstimate = async () => {
+    try {
+      const values = await quickForm.validateFields()
+      setLoading(true)
+
+      const template = templatesData?.templates?.find(t => t.id === values.template_id)
+
+      const response = await post<any>('/api/v1/template-estimates/estimate', {
+        name: `快速估算_${template?.name || ''}`,
+        project_type: template?.project_type || ProjectType.RESIDENTIAL,
+        area: values.area,
+        location: template?.name || '未知',
+        start_date: values.year?.format('YYYY'),
+        template_id: values.template_id
+      })
+
+      setTemplateEstimateResult(response)
+      message.success('快速估算完成')
+    } catch (error: any) {
+      message.error('快速估算失败')
+    } finally {
+      setLoading(false)
     }
-    return colors[type] || 'default'
   }
 
-  const getProjectTypeText = (type: ProjectType) => {
-    const texts = {
-      [ProjectType.RESIDENTIAL]: '住宅',
-      [ProjectType.COMMERCIAL]: '商业',
-      [ProjectType.INDUSTRIAL]: '工业',
-      [ProjectType.PUBLIC]: '公共',
-      [ProjectType.MIXED]: '混合'
+  // 执行AI估算
+  const handleAIEstimate = async () => {
+    try {
+      if (!selectedModelInfo || !selectedModelStatus) {
+        message.warning('请先选择AI模型')
+        return
+      }
+
+      if (!selectedModelStatus.configured || !selectedModelStatus.enabled) {
+        message.error(`${selectedModelStatus.providerName} 未配置或已禁用`)
+        return
+      }
+
+      // ✅ 修复：只验证AI估算的必填字段，避免与模板Tab的required规则冲突
+      // 必填字段：project_name, project_type, building_type, area, location, quality_level
+      // 可选字段会在后续form.getFieldsValue()中获取
+      const aiFields = [
+        'project_name',
+        'project_type',
+        'building_type',
+        'area',
+        'location',
+        'quality_level'
+      ]
+      const values = await form.validateFields(aiFields)
+
+      // 获取所有字段值（包括可选字段）
+      const allValues = form.getFieldsValue()
+      setLoading(true)
+
+      const backendProvider = getBackendProvider(selectedModelInfo.provider)
+
+      // 如果用户选择了参考模板，使用模板的单位造价作为参考
+      const referenceUnitCost = selectedTemplate?.unit_cost || null
+
+      const requestBody = {
+        project_name: allValues.project_name,
+        project_type: allValues.project_type,
+        building_type: allValues.building_type || null,
+        structure_type: allValues.structure_type || null,
+        area: allValues.area,
+        location: allValues.location,
+        floors: allValues.floors || null,
+        unit_cost: referenceUnitCost,  // 使用模板的单位造价作为参考
+        quality_level: allValues.quality_level,
+        construction_year: allValues.construction_year ? allValues.construction_year.year() : null,
+        construction_period: allValues.construction_period || null,
+        construction_standard: allValues.construction_standard || null,
+        design_standard: allValues.design_standard || null,
+        ai_provider: backendProvider,
+        ai_model: selectedModelInfo.id,
+        temperature: 0.7
+      }
+
+      // AI估算需要较长时间，设置90秒超时
+      const result = await post<any>('/api/v1/estimates/ai-estimate', requestBody, {
+        timeout: 90000  // 90秒超时（AI模型调用通常需要10-30秒）
+      })
+
+      setAiEstimateResult({
+        estimated_unit_cost: result.estimated_unit_cost,
+        total_cost: result.estimated_total_cost,
+        confidence: result.confidence,
+        breakdown: result.breakdown,
+        cost_breakdown: result.cost_breakdown,  // ✅ 修复：保存14级成本明细到状态
+        rationale: result.rationale,
+        model_used: result.model_used
+      })
+
+      message.success('AI估算完成')
+    } catch (error: any) {
+      console.error('AI estimate error:', error)
+      message.error(error?.response?.data?.detail || 'AI估算失败')
+    } finally {
+      setLoading(false)
     }
-    return texts[type] || '其他'
   }
 
-  const getQualityColor = (level: QualityLevel) => {
-    const colors = {
-      [QualityLevel.BASIC]: 'green',
-      [QualityLevel.STANDARD]: 'blue',
-      [QualityLevel.PREMIUM]: 'gold'
+  // 保存AI估算结果
+  const handleSaveAIEstimate = async () => {
+    if (!aiEstimateResult) {
+      message.warning('没有可保存的估算结果')
+      return
     }
-    return colors[level] || 'default'
+
+    try {
+      setSaving(true)
+      const values = form.getFieldsValue()
+
+      const saveRequest = {
+        project_name: values.project_name,
+        project_type: values.project_type,
+        area: values.area,
+        location: values.location,
+        estimated_unit_cost: aiEstimateResult.estimated_unit_cost,
+        estimated_total_cost: aiEstimateResult.total_cost,
+        confidence: aiEstimateResult.confidence,
+        breakdown: aiEstimateResult.breakdown,
+        cost_breakdown: aiEstimateResult.cost_breakdown || null,  // ✅ 新增：保存14级成本明细
+        rationale: aiEstimateResult.rationale,
+        model_used: aiEstimateResult.model_used,
+        ai_provider: selectedModelInfo?.provider || 'unknown',
+        quality_level: values.quality_level,
+        construction_year: values.construction_year ? values.construction_year.year() : null
+      }
+
+      const result = await post<any>('/api/v1/estimates/ai-estimate/save', saveRequest)
+
+      message.success(`估算结果已保存（ID: ${result.estimation_id}）`)
+
+      // 可选：跳转到历史记录页面
+      // navigate('/estimates/history')
+    } catch (error: any) {
+      console.error('Save AI estimate error:', error)
+      console.error('Error response:', error?.response)
+      console.error('Request data:', saveRequest)
+      message.error(error?.response?.data?.detail || '保存失败')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  const getQualityText = (level: QualityLevel) => {
-    const texts = {
-      [QualityLevel.BASIC]: '基础',
-      [QualityLevel.STANDARD]: '标准',
-      [QualityLevel.PREMIUM]: '高端'
-    }
-    return texts[level] || '未知'
+  // 14级成本数据格式化
+  const formatCostBreakdown = (breakdown: any) => {
+    console.log('🔍 [DEBUG] formatCostBreakdown called with:', breakdown)
+    if (!breakdown) return []
+
+    const { primary_sections, secondary_sections } = breakdown
+    console.log('🔍 [DEBUG] primary_sections:', primary_sections)
+    console.log('🔍 [DEBUG] secondary_sections:', secondary_sections)
+    if (!primary_sections) return []
+
+    // ✅ 修复：使用第14项（项目总造价）作为占比计算的分母
+    const item14 = primary_sections['14.0']
+    const totalCost = item14?.total_price || 0
+    console.log('🔍 [DEBUG] 第14项总造价:', totalCost)
+
+    return Object.entries(primary_sections).map(([code, data]: [string, any]) => {
+      const primaryCode = code.split('.')[0]
+      // ✅ 修复：二级分部占比基于所属的一级分部总价计算
+      const primaryTotal = data.total_price || 0
+      const children = secondary_sections ?
+        Object.entries(secondary_sections)
+          .filter(([secCode]) => secCode.startsWith(primaryCode + '.'))
+          .map(([secCode, secData]: [string, any]) => {
+            console.log(`🔍 [DEBUG] Secondary ${secCode}:`, secData)
+            // 二级分部占比 = 二级金额 / 所属一级金额 × 100%
+            const secondaryPercentage = primaryTotal > 0
+              ? parseFloat((secData.total_price / primaryTotal * 100).toFixed(2))
+              : 0
+            return {
+              key: secCode,
+              code: secCode,
+              name: secData.item_name || `成本项 ${secCode}`,
+              unit_price: secData.unit_price,
+              total_price: secData.total_price,
+              percentage: secondaryPercentage,
+              is_primary: false
+            }
+          }) : []
+
+      // ✅ 修复：第14项占比固定为100%，其他项基于第14项（总造价）计算
+      let primaryPercentage = 0
+      if (code === '14.0') {
+        // 第14项（项目总造价）占比 = 100%
+        primaryPercentage = 100.0
+      } else {
+        // 前13项占比 = 各项金额 / 第14项总造价 × 100%
+        primaryPercentage = totalCost > 0
+          ? parseFloat((data.total_price / totalCost * 100).toFixed(2))
+          : 0
+      }
+
+      return {
+        key: code,
+        code,
+        name: data.item_name || `成本项 ${code}`,
+        unit_price: data.unit_price,
+        total_price: data.total_price,
+        percentage: primaryPercentage,
+        is_primary: true,
+        children: children.length > 0 ? children : undefined
+      }
+    })
   }
 
-  const getSimilarityColor = (score: number) => {
-    if (score >= 0.8) return '#52c41a'
-    if (score >= 0.6) return '#faad14'
-    return '#ff4d4f'
+  // Excel导出
+  const exportToExcel = (result: any, type: 'template' | 'ai') => {
+    const workbook = XLSX.utils.book_new()
+
+    // Sheet1: 估算概要
+    const summaryData = [
+      ['成本估算报告'],
+      [''],
+      ['项目名称', result.project_name || form.getFieldValue('project_name')],
+      ['建筑面积', `${form.getFieldValue('area')}㎡`],
+      ['建设地点', form.getFieldValue('location')],
+      ['建设年份', result.new_start_date || form.getFieldValue('construction_year')?.format('YYYY')],
+      ['估算方式', type === 'template' ? '模板估算' : 'AI智能估算'],
+      [''],
+      ['估算总造价', `¥${(result.total_cost/10000).toFixed(2)}万元`],
+      ['单位造价', `¥${result.unit_cost?.toFixed(2) || result.estimated_unit_cost?.toFixed(2)}/㎡`],
+      ['置信度', `${(result.confidence * 100).toFixed(1)}%`],
+      [''],
+    ]
+
+    if (type === 'template') {
+      summaryData.push(
+        ['参考模板', result.matched_template_name],
+        ['模板时间', result.reference_start_date],
+        ['时间调整系数', result.adjustment_factors?.time_adjustment_factor?.toFixed(3) || '1.000'],
+        ['地区调整系数', regionFactor.toFixed(2)],
+        ['质量调整系数', qualityFactor.toFixed(2)]
+      )
+    } else {
+      summaryData.push(
+        ['使用模型', result.model_used],
+        ['估算依据', result.rationale]
+      )
+    }
+
+    summaryData.push(
+      [''],
+      ['报告生成时间', new Date().toLocaleString()]
+    )
+
+    const ws1 = XLSX.utils.aoa_to_sheet(summaryData)
+    XLSX.utils.book_append_sheet(workbook, ws1, '估算概要')
+
+    // Sheet2: 成本明细
+    if (result.cost_breakdown) {
+      const detailData = formatCostBreakdown(result.cost_breakdown).map(item => ({
+        '代码': item.code,
+        '项目名称': item.name,
+        '单位造价(元/㎡)': item.unit_price?.toFixed(2) || '-',
+        '合价(万元)': item.total_price ? (item.total_price/10000).toFixed(2) : '-',
+        '占比(%)': item.percentage.toFixed(2)
+      }))
+      const ws2 = XLSX.utils.json_to_sheet(detailData)
+      XLSX.utils.book_append_sheet(workbook, ws2, '成本明细')
+    }
+
+    // 下载
+    const fileName = `成本估算报告_${form.getFieldValue('project_name')}_${Date.now()}.xlsx`
+    XLSX.writeFile(workbook, fileName)
+    message.success(`报告已导出：${fileName}`)
   }
 
-  const similarityColumns: ColumnsType<ProjectMatch> = [
-    {
-      title: '项目名称',
-      dataIndex: ['historical_project', 'name'],
-      key: 'project_name',
-      render: (text: string, record: ProjectMatch) => (
-        <Space direction="vertical" size="small">
-          <Text strong>{text}</Text>
-          <Text type="secondary" style={{ fontSize: '12px' }}>
-            相似度: {(record.similarity_result.overall_score * 100).toFixed(1)}%
-          </Text>
-        </Space>
-      )
-    },
-    {
-      title: '项目类型',
-      dataIndex: ['historical_project', 'project_features', 'basic_features', 'project_type'],
-      key: 'project_type',
-      render: (type: ProjectType) => (
-        <Tag color={getProjectTypeColor(type)}>
-          {getProjectTypeText(type)}
-        </Tag>
-      )
-    },
-    {
-      title: '建筑面积',
-      dataIndex: ['historical_project', 'project_features', 'basic_features', 'area'],
-      key: 'area',
-      render: (area: number) => `${area.toLocaleString()} ㎡`
-    },
-    {
-      title: '单位造价',
-      dataIndex: ['historical_project', 'project_features', 'cost_features', 'unit_cost'],
-      key: 'unit_cost',
-      render: (cost: number) => `¥${cost.toLocaleString()}/㎡`
-    },
-    {
-      title: '质量等级',
-      dataIndex: ['historical_project', 'project_features', 'quality_features', 'quality_level'],
-      key: 'quality_level',
-      render: (level: QualityLevel) => (
-        <Tag color={getQualityColor(level)}>
-          {getQualityText(level)}
-        </Tag>
-      )
-    },
-    {
-      title: '置信度',
-      dataIndex: ['similarity_result', 'confidence_level'],
-      key: 'confidence_level',
-      render: (level: number) => (
-        <Space direction="vertical" size="small">
-          <Progress
-            percent={level * 100}
-            size="small"
-            strokeColor={getSimilarityColor(level)}
-            showInfo={false}
-          />
-          <Text style={{ fontSize: '12px', color: getSimilarityColor(level) }}>
-            {(level * 100).toFixed(1)}%
-          </Text>
-        </Space>
-      )
-    },
-    {
-      title: '操作',
-      key: 'actions',
-      render: (_, record: ProjectMatch) => (
-        <Space>
-          <Tooltip title="查看详情">
-            <Button
-              type="text"
-              icon={<EyeOutlined />}
-              onClick={() => {
-                setSelectedProjects([record.historical_project.id])
-                // 这里可以打开详情弹窗
-              }}
-            />
-          </Tooltip>
-        </Space>
-      )
+  // 添加到对比列表
+  const addToComparison = (result: any, type: 'template' | 'ai') => {
+    const comparisonItem = {
+      id: Date.now(),
+      name: `${type === 'template' ? '模板' : 'AI'}估算_${form.getFieldValue('project_name')}`,
+      type,
+      template_name: type === 'template' ? result.matched_template_name : result.model_used,
+      total_cost: result.total_cost,
+      unit_cost: result.unit_cost || result.estimated_unit_cost,
+      time_factor: result.adjustment_factors?.time_adjustment_factor || 1.0,
+      confidence: result.confidence,
+      timestamp: new Date().toLocaleString()
     }
-  ]
 
-  const suggestionColumns: ColumnsType<EstimateSuggestion> = [
-    {
-      title: '成本类别',
-      dataIndex: 'cost_category',
-      key: 'cost_category'
-    },
-    {
-      title: '建议单位造价',
-      dataIndex: 'suggested_unit_cost',
-      key: 'suggested_unit_cost',
-      render: (cost: number) => `¥${cost.toLocaleString()}/㎡`
-    },
-    {
-      title: '置信区间',
-      dataIndex: 'confidence_interval',
-      key: 'confidence_interval',
-      render: (interval: any) => (
-        <Space direction="vertical" size="small">
-          <Text>¥{interval.lower_bound.toLocaleString()}/㎡</Text>
-          <Text type="secondary">~ ¥{interval.upper_bound.toLocaleString()}/㎡</Text>
-        </Space>
-      )
-    },
-    {
-      title: '置信度',
-      dataIndex: 'confidence_interval',
-      key: 'confidence',
-      render: (interval: any) => `${(interval.confidence_level * 100).toFixed(0)}%`
-    },
-    {
-      title: '支撑项目',
-      dataIndex: 'supporting_projects',
-      key: 'supporting_projects',
-      render: (projects: string[]) => (
-        <Space wrap>
-          {projects.map((project, index) => (
-            <Tag key={index} color="blue">
-              {project}
-            </Tag>
-          ))}
-        </Space>
-      )
-    }
-  ]
+    setComparisonList([...comparisonList, comparisonItem])
+    message.success('已添加到对比列表')
+  }
 
-  const renderStepContent = () => {
-    switch (currentStep) {
-      case 0:
-        return (
-          <div>
-            {/* 模板选择区域 */}
-            <ProjectTemplateSelector
-              onTemplateSelect={handleTemplateSelect}
-              currentFormData={form.getFieldsValue()}
-              disabled={loading}
-              maxTemplates={6}
-              showAdvancedFilters={false}
-            />
-
-            {/* 项目基本信息表单 */}
-            <Card title="项目基本信息" style={{ marginTop: 16 }}>
-              {templateApplied && (
-                <Alert
-                  message="模板已应用"
-                  description={`已基于模板"${selectedTemplate?.project_name}"自动填充部分信息，您可以根据需要修改`}
-                  type="success"
-                  showIcon
-                  closable
-                  onClose={() => setTemplateApplied(false)}
-                  style={{ marginBottom: 16 }}
-                />
-              )}
-
-              <Form
-                form={form}
-                layout="vertical"
-                initialValues={{
-                  project_type: ProjectType.RESIDENTIAL,
-                  quality_level: QualityLevel.STANDARD
-                }}
+  // 模板估算Tab内容
+  const renderTemplateEstimate = () => (
+    <div>
+      {/* 智能推荐 */}
+      {recommendedTemplates.length > 0 && !expertMode && (
+        <Card title="🎯 智能推荐模板" size="small" style={{ marginBottom: 16 }} className="template-recommendation-card">
+          <List
+            dataSource={recommendedTemplates}
+            renderItem={(template: any) => (
+              <List.Item
+                actions={[
+                  <Button type="link" onClick={() => handleTemplateSelect(template.id)}>
+                    使用此模板
+                  </Button>
+                ]}
               >
-                <Row gutter={[16, 16]}>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="项目名称"
-                      name="project_name"
-                      rules={[{ required: true, message: '请输入项目名称' }]}
-                    >
-                      <Input placeholder="请输入项目名称" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="项目类型"
-                      name="project_type"
-                      rules={[{ required: true, message: '请选择项目类型' }]}
-                    >
-                      <Select placeholder="请选择项目类型">
-                        <Select.Option value={ProjectType.RESIDENTIAL}>住宅</Select.Option>
-                        <Select.Option value={ProjectType.COMMERCIAL}>商业</Select.Option>
-                        <Select.Option value={ProjectType.INDUSTRIAL}>工业</Select.Option>
-                        <Select.Option value={ProjectType.PUBLIC}>公共</Select.Option>
-                        <Select.Option value={ProjectType.MIXED}>混合</Select.Option>
-                      </Select>
-                    </Form.Item>
-                  </Col>
-                </Row>
+                <List.Item.Meta
+                  avatar={<DatabaseOutlined style={{ fontSize: 24, color: '#1890ff' }} />}
+                  title={template.name}
+                  description={
+                    <Space>
+                      <Tag color="blue">相似度 {(template.similarity_score * 100).toFixed(1)}%</Tag>
+                      <Text type="secondary">面积: {template.area}㎡</Text>
+                      <Text type="secondary">单价: ¥{template.unit_cost}/㎡</Text>
+                      {template.start_date && <Text type="secondary">{template.start_date}</Text>}
+                    </Space>
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        </Card>
+      )}
 
+      {/* 标准模式表单 */}
+      {!expertMode && (
+        <Card title="项目基本信息" style={{ marginBottom: 16 }}>
+          <Form form={form} layout="vertical" initialValues={{ quality_level: QualityLevel.STANDARD }}>
+            {/* 模板选择 */}
+            <Form.Item
+              label="选择参考模板"
+              name="template_id"
+              rules={[{ required: true, message: '请选择模板' }]}
+            >
+              <Select
+                showSearch
+                placeholder="选择历史项目模板"
+                onChange={handleTemplateSelect}
+                optionFilterProp="children"
+                filterOption={(input, option: any) =>
+                  option?.children?.toString().toLowerCase().includes(input.toLowerCase())
+                }
+              >
+                {templatesData?.templates?.map(t => (
+                  <Select.Option key={t.id} value={t.id}>
+                    <div>
+                      <div><Text strong>{t.name}</Text></div>
+                      <Text type="secondary" style={{fontSize: 12}}>
+                        {t.area}㎡ | ¥{t.unit_cost}/㎡ | {t.start_date}
+                      </Text>
+                    </div>
+                  </Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+
+            {/* 模板信息预览 */}
+            {selectedTemplate && (
+              <Alert
+                type="info"
+                message={`参考模板：${selectedTemplate.name}`}
+                description={
+                  <Descriptions column={2} size="small">
+                    <Descriptions.Item label="建设时间">{selectedTemplate.start_date || '未知'}</Descriptions.Item>
+                    <Descriptions.Item label="建筑面积">{selectedTemplate.area}㎡</Descriptions.Item>
+                    <Descriptions.Item label="项目类型">{selectedTemplate.project_type || '未知'}</Descriptions.Item>
+                    <Descriptions.Item label="单位造价">¥{selectedTemplate.unit_cost}/㎡</Descriptions.Item>
+                  </Descriptions>
+                }
+                style={{ marginBottom: 16 }}
+              />
+            )}
+
+            <Row gutter={[16, 16]}>
+              <Col xs={24} sm={12}>
+                <Form.Item label="项目名称" name="project_name" rules={[{ required: true, message: '请输入项目名称' }]}>
+                  <Input placeholder="请输入项目名称" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item label="建筑面积(㎡)" name="area" rules={[{ required: true, message: '请输入建筑面积' }]}>
+                  <InputNumber style={{width: '100%'}} placeholder="请输入建筑面积" min={1} />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            <Row gutter={[16, 16]}>
+              <Col xs={24} sm={12}>
+                <Form.Item label="建设地点" name="location" rules={[{ required: true, message: '请输入建设地点' }]}>
+                  <Input placeholder="如：西安市" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item
+                  label="新项目建设年份"
+                  name="construction_year"
+                  rules={[{ required: true, message: '请选择建设年份' }]}
+                  extra={selectedTemplate?.start_date && (
+                    <Text type="secondary">
+                      参考项目建于 {selectedTemplate.start_date}，系统将自动调整造价
+                    </Text>
+                  )}
+                >
+                  <DatePicker picker="year" style={{width: '100%'}} placeholder="选择建设年份" />
+                </Form.Item>
+              </Col>
+            </Row>
+
+            {/* 调整系数设置 */}
+            <Card title="调整系数设置" size="small" style={{marginBottom: 16}}>
               <Row gutter={[16, 16]}>
                 <Col xs={24} sm={12}>
                   <Form.Item
-                    label="建筑类型"
-                    name="building_type"
-                    rules={[{ required: true, message: '请输入建筑类型' }]}
-                  >
-                    <Input placeholder="如：高层住宅、商业综合体等" />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={12}>
-                  <Form.Item
-                    label="结构类型"
-                    name="structure_type"
-                    rules={[{ required: true, message: '请输入结构类型' }]}
-                  >
-                    <Input placeholder="如：框架结构、剪力墙结构等" />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Row gutter={[16, 16]}>
-                <Col xs={24} sm={8}>
-                  <Form.Item
-                    label="建筑面积 (㎡)"
-                    name="area"
-                    rules={[{ required: true, message: '请输入建筑面积' }]}
+                    label="地区调整系数"
+                    extra="北京1.2 上海1.15 西安1.0 成都0.95"
                   >
                     <InputNumber
-                      style={{ width: '100%' }}
-                      placeholder="请输入建筑面积"
-                      min={1}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={8}>
-                  <Form.Item
-                    label="建设地点"
-                    name="location"
-                    rules={[{ required: true, message: '请输入建设地点' }]}
-                  >
-                    <Input placeholder="如：北京市朝阳区" />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={8}>
-                  <Form.Item
-                    label="层数"
-                    name="floors"
-                  >
-                    <InputNumber
-                      style={{ width: '100%' }}
-                      placeholder="请输入层数"
-                      min={1}
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              <Row gutter={[16, 16]}>
-                <Col xs={24} sm={8}>
-                  <Form.Item label="建设年份">
-                    <DatePicker picker="year" style={{ width: '100%' }} />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={8}>
-                  <Form.Item label="建设周期 (月)">
-                    <InputNumber
-                      style={{ width: '100%' }}
-                      placeholder="请输入建设周期"
-                      min={1}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} sm={8}>
-                  <Form.Item label="预估单位造价 (元/㎡)">
-                    <InputNumber
-                      style={{ width: '100%' }}
-                      placeholder="可选，用于参考"
-                      min={0}
+                      value={regionFactor}
+                      onChange={(v) => setRegionFactor(v || 1.0)}
+                      min={0.5}
+                      max={2.0}
+                      step={0.05}
                       precision={2}
+                      style={{width: '100%'}}
+                      addonAfter="倍"
                     />
                   </Form.Item>
                 </Col>
-              </Row>
-
-              <Row gutter={[16, 16]}>
                 <Col xs={24} sm={12}>
                   <Form.Item
                     label="质量等级"
                     name="quality_level"
                     rules={[{ required: true, message: '请选择质量等级' }]}
                   >
-                    <Select placeholder="请选择质量等级">
-                      <Select.Option value={QualityLevel.BASIC}>基础</Select.Option>
-                      <Select.Option value={QualityLevel.STANDARD}>标准</Select.Option>
-                      <Select.Option value={QualityLevel.PREMIUM}>高端</Select.Option>
+                    <Select onChange={(value: string) => {
+                      const factorMap: Record<string, number> = {
+                        [QualityLevel.BASIC]: 0.9,
+                        [QualityLevel.STANDARD]: 1.0,
+                        [QualityLevel.PREMIUM]: 1.2
+                      }
+                      setQualityFactor(factorMap[value] || 1.0)
+                    }}>
+                      <Select.Option value={QualityLevel.BASIC}>基础（0.9倍）</Select.Option>
+                      <Select.Option value={QualityLevel.STANDARD}>标准（1.0倍）</Select.Option>
+                      <Select.Option value={QualityLevel.PREMIUM}>高端（1.2倍）</Select.Option>
                     </Select>
                   </Form.Item>
                 </Col>
-                <Col xs={24} sm={12}>
-                  <Form.Item label="建设标准">
-                    <Input placeholder="如：GB50000-2013" />
-                  </Form.Item>
-                </Col>
               </Row>
-
-              <Row gutter={[16, 16]}>
-                <Col xs={24}>
-                  <Form.Item label="设计标准">
-                    <Input.TextArea
-                      rows={3}
-                      placeholder="请输入设计标准和特殊要求..."
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-
-              {projectFeatures?.cost_features?.unit_cost && (
-                <Alert
-                  message="参考单价"
-                  description={`基于您的输入，系统预估单位造价约为 ¥${projectFeatures.cost_features.unit_cost.toLocaleString()}/㎡，将基于历史数据进行调整`}
-                  type="info"
-                  showIcon
-                />
-              )}
-            </Form>
-          </Card>
-        </div>
-        )
-
-      case 1:
-        return (
-          <div>
-            <Card
-              title="匹配结果"
-              extra={
-                <Space>
-                  <Button icon={<SettingOutlined />} onClick={() => {
-                    Modal.info({
-                      title: '权重配置说明',
-                      content: (
-                        <div>
-                          <p>• 基础特征权重：影响项目类型、面积、结构等基础信息的匹配度</p>
-                          <p>• 成本特征权重：影响单位造价、成本构成等财务指标的匹配度</p>
-                          <p>• 质量特征权重：影响质量等级、建设标准等技术要求的匹配度</p>
-                          <p>• 地理位置、时间因素权重：影响地区差异和时间因素</p>
-                          <p>当前权重总和: {(matchWeights.basic_weight + matchWeights.cost_weight + matchWeights.quality_weight + matchWeights.location_weight + matchWeights.temporal_weight).toFixed(2)}</p>
-                        </div>
-                      ),
-                      width: 500
-                    })
-                  }}>
-                    权重配置
-                  </Button>
-                  <Button icon={<ReloadOutlined />} onClick={() => {
-                    setCurrentStep(0)
-                  }}>
-                    重新选择
-                  </Button>
-                  <Button icon={<DownloadOutlined />}>
-                    导出报告
-                  </Button>
-                </Space>
-              }
-            >
-              {similarProjects.length > 0 ? (
-                <Table
-                  columns={similarityColumns}
-                  dataSource={similarProjects}
-                  rowKey="historical_project.id"
-                  pagination={false}
-                  size="small"
-                  rowSelection={{
-                    type: 'checkbox',
-                    onChange: (selectedRowKeys) => {
-                      setSelectedProjects(selectedRowKeys as string[])
-                    }
-                  }}
-                />
-              ) : (
-                <div style={{ textAlign: 'center', padding: '40px' }}>
-                  <SearchOutlined style={{ fontSize: 48, color: '#ccc', marginBottom: 16 }} />
-                  <Text type="secondary">正在为您匹配相似项目...</Text>
-                  {loading && <Spin />}
-                </div>
-              )}
             </Card>
 
-            {similarProjects.length > 0 && (
-              <Card
-                title="估算建议"
-                style={{ marginTop: 24 }}
-                extra={
-                  <Space>
-                    <Text type="secondary">
-                      基于选中的 {selectedProjects.length} 个相似项目
-                    </Text>
-                  </Space>
-                }
-              >
-                <Table
-                  columns={suggestionColumns}
-                  dataSource={similarProjects
-                    .filter(p => selectedProjects.includes(p.historical_project.id))
-                    .flatMap(p => p.cost_estimates)}
-                  rowKey={(record, index) => `${record.cost_category}-${index}`}
-                  pagination={false}
-                  size="small"
-                />
-              </Card>
-            )}
-          </div>
-        )
+            {/* 可选字段 */}
+            <Row gutter={[16, 16]}>
+              <Col xs={24} sm={12}>
+                <Form.Item label="项目类型" name="project_type">
+                  <Select placeholder="请选择项目类型">
+                    <Select.Option value={ProjectType.RESIDENTIAL}>住宅</Select.Option>
+                    <Select.Option value={ProjectType.COMMERCIAL}>商业</Select.Option>
+                    <Select.Option value={ProjectType.INDUSTRIAL}>工业</Select.Option>
+                    <Select.Option value={ProjectType.PUBLIC}>公共</Select.Option>
+                    <Select.Option value={ProjectType.MIXED}>混合</Select.Option>
+                  </Select>
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12}>
+                <Form.Item label="建设周期(月)" name="construction_period">
+                  <InputNumber style={{width: '100%'}} placeholder="请输入建设周期" min={1} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </Form>
+        </Card>
+      )}
 
-      default:
-        return null
-    }
-  }
+      {/* 快速模式表单 */}
+      {expertMode && (
+        <Card title="⚡ 快速估算（仅填3项）">
+          <Form form={quickForm} layout="inline" onFinish={handleQuickEstimate}>
+            <Form.Item label="模板" name="template_id" rules={[{required: true, message: '请选择模板'}]}>
+              <Select style={{width: 200}} placeholder="选择模板">
+                {templatesData?.templates?.slice(0, 10).map(t => (
+                  <Select.Option key={t.id} value={t.id}>{t.name}</Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+
+            <Form.Item label="面积(㎡)" name="area" rules={[{required: true, message: '请输入面积'}]}>
+              <InputNumber min={1} placeholder="10000" />
+            </Form.Item>
+
+            <Form.Item label="年份" name="year" rules={[{required: true, message: '请选择年份'}]}>
+              <DatePicker picker="year" />
+            </Form.Item>
+
+            <Form.Item>
+              <Button type="primary" htmlType="submit" icon={<ThunderboltOutlined />} loading={loading}>
+                立即估算
+              </Button>
+            </Form.Item>
+          </Form>
+
+          <Alert
+            type="info"
+            message="使用默认值：地点=模板地点，质量=标准"
+            style={{marginTop: 16}}
+          />
+        </Card>
+      )}
+
+      {/* 估算结果 */}
+      {templateEstimateResult && (
+        <Card title="📊 模板估算结果" style={{marginTop: 24}}>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} sm={6}>
+              <Statistic
+                title="估算总造价"
+                value={templateEstimateResult.total_cost / 10000}
+                prefix="¥"
+                suffix="万"
+                precision={2}
+                valueStyle={{ color: '#1890ff' }}
+              />
+            </Col>
+            <Col xs={24} sm={6}>
+              <Statistic
+                title="单位造价"
+                value={templateEstimateResult.unit_cost}
+                prefix="¥"
+                suffix="/㎡"
+                precision={2}
+                valueStyle={{ color: '#52c41a' }}
+              />
+            </Col>
+            <Col xs={24} sm={6}>
+              <div>
+                <Statistic
+                  title="时间调整系数"
+                  value={templateEstimateResult.adjustment_factors?.time_adjustment_factor || 1.0}
+                  precision={3}
+                  valueStyle={{
+                    color: (templateEstimateResult.adjustment_factors?.time_adjustment_factor || 1.0) > 1
+                      ? '#cf1322' : '#3f8600'
+                  }}
+                  prefix={(templateEstimateResult.adjustment_factors?.time_adjustment_factor || 1.0) > 1
+                    ? '↑' : '↓'}
+                />
+                <Text type="secondary" style={{fontSize: 12}}>
+                  {templateEstimateResult.adjustment_factors?.years_difference || 0}年差异
+                </Text>
+              </div>
+            </Col>
+            <Col xs={24} sm={6}>
+              <Statistic
+                title="置信度"
+                value={templateEstimateResult.confidence * 100}
+                suffix="%"
+                precision={1}
+                valueStyle={{ color: '#faad14' }}
+              />
+            </Col>
+          </Row>
+
+          <Divider />
+
+          <Alert
+            type="info"
+            message="造价调整说明"
+            description={
+              <Descriptions column={2} size="small">
+                <Descriptions.Item label="参考模板">
+                  {templateEstimateResult.matched_template_name}
+                </Descriptions.Item>
+                <Descriptions.Item label="参考时间">
+                  {templateEstimateResult.reference_start_date || '未知'}
+                </Descriptions.Item>
+                <Descriptions.Item label="新建时间">
+                  {templateEstimateResult.new_start_date || '未知'}
+                </Descriptions.Item>
+                <Descriptions.Item label="时间调整">
+                  {(templateEstimateResult.adjustment_factors?.time_adjustment_factor || 1.0).toFixed(3)}
+                </Descriptions.Item>
+                <Descriptions.Item label="地区调整">
+                  {regionFactor.toFixed(2)}倍
+                </Descriptions.Item>
+                <Descriptions.Item label="质量调整">
+                  {qualityFactor.toFixed(2)}倍
+                </Descriptions.Item>
+              </Descriptions>
+            }
+            style={{marginBottom: 16}}
+          />
+
+          <Divider>14级成本构成明细</Divider>
+
+          <Table
+            dataSource={formatCostBreakdown(templateEstimateResult.cost_breakdown)}
+            columns={[
+              {
+                title: '代码',
+                dataIndex: 'code',
+                width: 100,
+                render: (code: string, record: any) => (
+                  <Text strong={record.is_primary}>{code}</Text>
+                )
+              },
+              {
+                title: '项目名称',
+                dataIndex: 'name',
+                width: 300,
+                render: (name: string, record: any) => (
+                  <Text strong={record.is_primary}>{name}</Text>
+                )
+              },
+              {
+                title: '单位造价',
+                dataIndex: 'unit_price',
+                align: 'right' as const,
+                render: (v: number) => v ? `¥${v.toFixed(2)}/㎡` : '-'
+              },
+              {
+                title: '合价',
+                dataIndex: 'total_price',
+                align: 'right' as const,
+                render: (v: number) => v ? `¥${(v/10000).toFixed(2)}万` : '-'
+              },
+              {
+                title: '占比',
+                dataIndex: 'percentage',
+                width: 200,
+                render: (v: number) => <Progress percent={v} size="small" />
+              }
+            ]}
+            expandable={{
+              childrenColumnName: 'children',
+              defaultExpandAllRows: false,
+              indentSize: 20
+            }}
+            pagination={false}
+            size="small"
+            bordered
+            rowClassName={(record: any) => record.is_primary ? 'primary-section-row' : ''}
+          />
+
+          <Divider />
+
+          {/* ✅ 新增：显示已保存提示 */}
+          {templateEstimateResult.estimation_id && (
+            <Alert
+              type="success"
+              message="估算结果已自动保存"
+              description={`估算记录ID: ${templateEstimateResult.estimation_id}，您可以在"历史数据管理"中查看和管理此估算记录。`}
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+          )}
+
+          <Space size="large">
+            <Button
+              type="primary"
+              icon={<DownloadOutlined />}
+              onClick={() => exportToExcel(templateEstimateResult, 'template')}
+            >
+              导出Excel报告
+            </Button>
+            <Button
+              icon={<SwapOutlined />}
+              onClick={() => addToComparison(templateEstimateResult, 'template')}
+            >
+              添加到对比
+            </Button>
+            <Button onClick={() => setShowComparison(true)}>
+              查看对比 ({comparisonList.length})
+            </Button>
+          </Space>
+        </Card>
+      )}
+
+      {!loading && !templateEstimateResult && (
+        <Empty
+          description="请填写项目信息后点击下方'开始估算'按钮执行模板估算"
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
+      )}
+
+      <Divider />
+
+      <div style={{ textAlign: 'center' }}>
+        <Button
+          type="primary"
+          size="large"
+          icon={<CalculatorOutlined />}
+          onClick={expertMode ? handleQuickEstimate : handleTemplateEstimate}
+          loading={loading}
+        >
+          开始估算
+        </Button>
+      </div>
+    </div>
+  )
+
+  // AI估算Tab内容
+  const renderAIEstimate = () => (
+    <div>
+      <Card title="项目基本信息" style={{ marginBottom: 16 }}>
+        <Form form={form} layout="vertical" initialValues={{ quality_level: QualityLevel.STANDARD }}>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} sm={12}>
+              <Form.Item label="项目名称" name="project_name" rules={[{ required: true }]}>
+                <Input placeholder="请输入项目名称" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item label="项目类型" name="project_type" rules={[{ required: true }]}>
+                <Select placeholder="请选择项目类型">
+                  <Select.Option value={ProjectType.RESIDENTIAL}>住宅</Select.Option>
+                  <Select.Option value={ProjectType.COMMERCIAL}>商业</Select.Option>
+                  <Select.Option value={ProjectType.INDUSTRIAL}>工业</Select.Option>
+                  <Select.Option value={ProjectType.PUBLIC}>公共</Select.Option>
+                  <Select.Option value={ProjectType.MIXED}>混合</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} sm={12}>
+              <Form.Item label="建筑类型" name="building_type" rules={[{ required: true }]}>
+                <Input placeholder="如：高层住宅、商业综合体等" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item label="结构类型" name="structure_type">
+                <Input placeholder="如：框架结构、剪力墙结构等" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} sm={8}>
+              <Form.Item label="建筑面积(㎡)" name="area" rules={[{ required: true }]}>
+                <InputNumber style={{width: '100%'}} placeholder="请输入建筑面积" min={1} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Form.Item label="建设地点" name="location" rules={[{ required: true }]}>
+                <Input placeholder="如：北京市朝阳区" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Form.Item label="层数" name="floors">
+                <InputNumber style={{width: '100%'}} placeholder="请输入层数" min={1} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} sm={8}>
+              <Form.Item label="建设年份" name="construction_year">
+                <DatePicker picker="year" style={{width: '100%'}} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Form.Item label="建设周期(月)" name="construction_period">
+                <InputNumber style={{width: '100%'}} placeholder="请输入建设周期" min={1} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={8}>
+              <Form.Item label="质量等级" name="quality_level" rules={[{ required: true }]}>
+                <Select placeholder="请选择质量等级">
+                  <Select.Option value={QualityLevel.BASIC}>基础</Select.Option>
+                  <Select.Option value={QualityLevel.STANDARD}>标准</Select.Option>
+                  <Select.Option value={QualityLevel.PREMIUM}>高端</Select.Option>
+                </Select>
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} sm={12}>
+              <Form.Item label="建设标准" name="construction_standard">
+                <Input placeholder="如：GB50000-2013" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12}>
+              <Form.Item label="设计标准" name="design_standard">
+                <Input.TextArea rows={2} placeholder="请输入设计标准和特殊要求..." />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
+      </Card>
+
+      <Card title="AI估算说明" style={{ marginBottom: 16 }}>
+        <Alert
+          message="AI智能估算"
+          description="使用大语言模型和机器学习算法，基于大量历史数据进行智能估算。适用于历史数据库中无相似项目的情况。"
+          type="info"
+          showIcon
+          icon={<ApiOutlined />}
+        />
+        {selectedTemplate && (
+          <Alert
+            message="参考模板已选择"
+            description={
+              <div>
+                <Text>AI 估算将参考模板 <Text strong>{selectedTemplate.name}</Text> 的单位造价 <Text strong>¥{selectedTemplate.unit_cost}/㎡</Text> 进行智能调整</Text>
+              </div>
+            }
+            type="success"
+            showIcon
+            style={{ marginTop: 12 }}
+            closable
+          />
+        )}
+      </Card>
+
+      <Card title={<Space><RobotOutlined /> 选择AI模型</Space>} style={{ marginBottom: 16 }}>
+        {!hasConfiguredModels && (
+          <Alert
+            message="未配置AI模型"
+            description={
+              <span>
+                您还没有配置任何AI模型，请先前往
+                <a href="/settings/system" style={{ marginLeft: 4, marginRight: 4 }}>系统设置</a>
+                配置API密钥后再使用AI智能估算功能
+              </span>
+            }
+            type="warning"
+            showIcon
+            icon={<WarningOutlined />}
+            style={{ marginBottom: 16 }}
+            closable
+          />
+        )}
+
+        <Row gutter={[16, 16]}>
+          <Col span={24}>
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Text strong>请选择用于估算的AI模型：</Text>
+              <SmartModelSelector
+                value={selectedModel || undefined}
+                onChange={(value: string) => setSelectedModel(value)}
+                onModelSelect={handleModelSelect}
+                autoSelectConfigured={true}
+                placeholder="请选择AI模型（带绿色标记的为已配置）"
+                size="large"
+              />
+              {selectedModelInfo && selectedModelStatus && (
+                <Alert
+                  message={
+                    <Space>
+                      <Text>已选择：</Text>
+                      <Text strong>{selectedModelInfo.displayName}</Text>
+                      <Text type="secondary">({selectedModelStatus.providerName})</Text>
+                    </Space>
+                  }
+                  type="success"
+                  showIcon
+                  style={{ marginTop: 8 }}
+                />
+              )}
+            </Space>
+          </Col>
+        </Row>
+      </Card>
+
+      {aiEstimateResult && (
+        <Card title="📊 AI估算结果" style={{ marginBottom: 16 }}>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} sm={8}>
+              <Statistic
+                title="估算单位造价"
+                value={aiEstimateResult.estimated_unit_cost}
+                prefix="¥"
+                suffix="/㎡"
+                precision={2}
+              />
+            </Col>
+            <Col xs={24} sm={8}>
+              <Statistic
+                title="估算总造价"
+                value={aiEstimateResult.total_cost / 10000}
+                prefix="¥"
+                suffix="万"
+                precision={2}
+              />
+            </Col>
+            <Col xs={24} sm={8}>
+              <Statistic
+                title="AI置信度"
+                value={aiEstimateResult.confidence * 100}
+                suffix="%"
+                precision={1}
+                valueStyle={{ color: '#1890ff' }}
+              />
+            </Col>
+          </Row>
+
+          <Divider />
+
+          {/* ✅ 新增：14级成本构成明细表格 */}
+          {aiEstimateResult.cost_breakdown && (
+            <>
+              <Divider>14级成本构成明细</Divider>
+
+              <Table
+                dataSource={formatCostBreakdown(aiEstimateResult.cost_breakdown)}
+                columns={[
+                  {
+                    title: '代码',
+                    dataIndex: 'code',
+                    width: 100,
+                    render: (code: string, record: any) => (
+                      <Text strong={record.is_primary}>{code}</Text>
+                    )
+                  },
+                  {
+                    title: '项目名称',
+                    dataIndex: 'name',
+                    width: 300,
+                    render: (name: string, record: any) => (
+                      <Text strong={record.is_primary}>{name}</Text>
+                    )
+                  },
+                  {
+                    title: '单位造价',
+                    dataIndex: 'unit_price',
+                    align: 'right' as const,
+                    render: (v: number) => v ? `¥${v.toFixed(2)}/㎡` : '-'
+                  },
+                  {
+                    title: '合价',
+                    dataIndex: 'total_price',
+                    align: 'right' as const,
+                    render: (v: number) => v ? `¥${(v/10000).toFixed(2)}万` : '-'
+                  },
+                  {
+                    title: '占比',
+                    dataIndex: 'percentage',
+                    width: 200,
+                    render: (v: number) => <Progress percent={v} size="small" />
+                  }
+                ]}
+                expandable={{
+                  childrenColumnName: 'children',
+                  defaultExpandAllRows: false,
+                  indentSize: 20
+                }}
+                pagination={false}
+                size="small"
+                bordered
+                rowClassName={(record: any) => record.is_primary ? 'primary-section-row' : ''}
+              />
+
+              <Divider />
+            </>
+          )}
+
+          {/* 原有的4大类成本构成分析（向后兼容） */}
+          {!aiEstimateResult.cost_breakdown && (
+            <>
+              <Title level={5}>成本构成分析</Title>
+              <Table
+                dataSource={aiEstimateResult.breakdown}
+                columns={[
+                  { title: '成本类别', dataIndex: 'category', key: 'category' },
+                  {
+                    title: '单位造价',
+                    dataIndex: 'unit_cost',
+                    key: 'unit_cost',
+                    render: (value: number) => `¥${value.toFixed(2)}/㎡`
+                  },
+                  {
+                    title: '占比',
+                    dataIndex: 'percentage',
+                    key: 'percentage',
+                    render: (value: number) => (
+                      <Progress percent={value} size="small" />
+                    )
+                  }
+                ]}
+                pagination={false}
+                size="small"
+              />
+
+              <Divider />
+            </>
+          )}
+
+          <Paragraph>
+            <Text strong>估算依据: </Text>
+            {aiEstimateResult.rationale}
+          </Paragraph>
+          <Text type="secondary">模型: {aiEstimateResult.model_used}</Text>
+
+          <Divider />
+
+          <Space size="large">
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              onClick={handleSaveAIEstimate}
+              loading={saving}
+            >
+              保存估算结果
+            </Button>
+            <Button
+              icon={<DownloadOutlined />}
+              onClick={() => exportToExcel(aiEstimateResult, 'ai')}
+            >
+              导出Excel报告
+            </Button>
+            <Button
+              icon={<SwapOutlined />}
+              onClick={() => addToComparison(aiEstimateResult, 'ai')}
+            >
+              添加到对比
+            </Button>
+            <Button onClick={() => setShowComparison(true)}>
+              查看对比 ({comparisonList.length})
+            </Button>
+          </Space>
+        </Card>
+      )}
+
+      {!loading && !aiEstimateResult && (
+        <Empty
+          description="请填写项目信息后点击下方'开始估算'按钮执行AI智能估算"
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+        />
+      )}
+
+      <Divider />
+
+      <div style={{ textAlign: 'center' }}>
+        <Button
+          type="primary"
+          size="large"
+          icon={<CalculatorOutlined />}
+          onClick={handleAIEstimate}
+          loading={loading}
+        >
+          开始估算
+        </Button>
+      </div>
+    </div>
+  )
 
   return (
     <div className="smart-estimate-page">
       <div className="page-header" style={{ marginBottom: 24 }}>
-        <Title level={2}>智能估算</Title>
-        <Text type="secondary">基于历史项目数据，提供智能成本估算建议</Text>
+        <Title level={2} className="estimates-title">
+          <RobotOutlined style={{ marginRight: 8 }} />
+          智能成本估算
+        </Title>
+        <Text type="secondary">
+          支持模板估算和AI估算两种方式，灵活满足不同估算需求
+        </Text>
       </div>
 
-      <Card>
-        <Steps current={currentStep} items={steps} />
-      </Card>
+      <Spin spinning={loading}>
+        <Card>
+          <Tabs
+            activeKey={activeTab}
+            onChange={(key) => setActiveTab(key as 'template' | 'ai')}
+            size="large"
+            tabBarExtraContent={
+              activeTab === 'template' && (
+                <Switch
+                  checkedChildren="专家模式"
+                  unCheckedChildren="标准模式"
+                  checked={expertMode}
+                  onChange={setExpertMode}
+                />
+              )
+            }
+          >
+            <TabPane tab="📊 模板估算" key="template">
+              {renderTemplateEstimate()}
+            </TabPane>
 
-      <div style={{ marginTop: 24 }}>
-        {renderStepContent()}
-      </div>
+            <TabPane tab="🤖 AI估算" key="ai">
+              {renderAIEstimate()}
+            </TabPane>
+          </Tabs>
+        </Card>
+      </Spin>
 
-      <div style={{ marginTop: 24, textAlign: 'right' }}>
-        <Space>
-          {currentStep > 0 && (
-            <Button onClick={handlePrev}>
-              上一步
-            </Button>
-          )}
-          {currentStep === 0 && (
-            <Button type="primary" onClick={handleNext} loading={loading}>
-              查看建议
-            </Button>
-          )}
-          {currentStep === 1 && (
-            <Button type="primary" onClick={() => message.success('智能估算完成！')}>
-              完成估算
-            </Button>
-          )}
-        </Space>
-      </div>
+      {/* 对比分析抽屉 */}
+      <Drawer
+        title="估算结果对比"
+        open={showComparison}
+        onClose={() => setShowComparison(false)}
+        width={1200}
+      >
+        <Table
+          dataSource={comparisonList}
+          columns={[
+            { title: '估算方案', dataIndex: 'name', fixed: 'left' as const, width: 200 },
+            {
+              title: '估算方式',
+              dataIndex: 'type',
+              render: (v: string) => v === 'template' ?
+                <Tag color="blue">模板</Tag> : <Tag color="green">AI</Tag>
+            },
+            { title: '使用模板/模型', dataIndex: 'template_name' },
+            {
+              title: '总造价',
+              dataIndex: 'total_cost',
+              render: (v: number) => `¥${(v/10000).toFixed(2)}万`,
+              sorter: (a: any, b: any) => a.total_cost - b.total_cost
+            },
+            {
+              title: '单位造价',
+              dataIndex: 'unit_cost',
+              render: (v: number) => `¥${v.toFixed(2)}/㎡`,
+              sorter: (a: any, b: any) => a.unit_cost - b.unit_cost
+            },
+            {
+              title: '时间调整',
+              dataIndex: 'time_factor',
+              render: (v: number) => v.toFixed(3)
+            },
+            {
+              title: '置信度',
+              dataIndex: 'confidence',
+              render: (v: number) => `${(v * 100).toFixed(1)}%`,
+              sorter: (a: any, b: any) => a.confidence - b.confidence
+            },
+            { title: '创建时间', dataIndex: 'timestamp' },
+            {
+              title: '操作',
+              render: (_: any, record: any) => (
+                <Button
+                  type="text"
+                  danger
+                  size="small"
+                  onClick={() => setComparisonList(comparisonList.filter(item => item.id !== record.id))}
+                >
+                  移除
+                </Button>
+              )
+            }
+          ]}
+          scroll={{ x: 1200 }}
+          pagination={false}
+        />
+      </Drawer>
     </div>
   )
 }

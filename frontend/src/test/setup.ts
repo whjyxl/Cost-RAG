@@ -1,5 +1,6 @@
-import '@testing-library/jest-dom'
+import '@testing-library/jest-dom/vitest'
 import { configure } from '@testing-library/react'
+import { vi } from 'vitest'
 
 // 配置testing-library
 configure({
@@ -7,41 +8,58 @@ configure({
   asyncUtilTimeout: 5000,
 })
 
-// Mock matchMedia
-Object.defineProperty(window, 'matchMedia', {
-  writable: true,
-  value: jest.fn().mockImplementation((query) => ({
+// Mock matchMedia - 修复antd responsiveObserver的问题
+// antd的responsiveObserver期望matchMedia返回的对象有matches属性
+import { vi } from 'vitest'
+
+// 创建一个全局的matchMedia mock
+const createMatchMedia = (query: string) => {
+  const mediaQuery = {
     matches: false,
     media: query,
     onchange: null,
-    addListener: jest.fn(), // deprecated
-    removeListener: jest.fn(), // deprecated
-    addEventListener: jest.fn(),
-    removeEventListener: jest.fn(),
-    dispatchEvent: jest.fn(),
-  })),
+    addListener: vi.fn(), // deprecated
+    removeListener: vi.fn(), // deprecated
+    addEventListener: vi.fn((event: string, callback: () => void) => {
+      // 存储callback以便后续调用
+      if (!mediaQuery.listeners) {
+        mediaQuery.listeners = []
+      }
+      mediaQuery.listeners.push(callback)
+    }),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+    listeners: [] as (() => void)[],
+  }
+  return mediaQuery
+}
+
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  configurable: true,
+  value: createMatchMedia,
 })
 
 // Mock ResizeObserver
-global.ResizeObserver = jest.fn().mockImplementation(() => ({
-  observe: jest.fn(),
-  unobserve: jest.fn(),
-  disconnect: jest.fn(),
+global.ResizeObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
 }))
 
 // Mock IntersectionObserver
-global.IntersectionObserver = jest.fn().mockImplementation(() => ({
-  observe: jest.fn(),
-  unobserve: jest.fn(),
-  disconnect: jest.fn(),
+global.IntersectionObserver = vi.fn().mockImplementation(() => ({
+  observe: vi.fn(),
+  unobserve: vi.fn(),
+  disconnect: vi.fn(),
 }))
 
 // Mock localStorage
 const localStorageMock = {
-  getItem: jest.fn(),
-  setItem: jest.fn(),
-  removeItem: jest.fn(),
-  clear: jest.fn(),
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+  clear: vi.fn(),
 }
 Object.defineProperty(window, 'localStorage', {
   value: localStorageMock,
@@ -49,10 +67,10 @@ Object.defineProperty(window, 'localStorage', {
 
 // Mock sessionStorage
 const sessionStorageMock = {
-  getItem: jest.fn(),
-  setItem: jest.fn(),
-  removeItem: jest.fn(),
-  clear: jest.fn(),
+  getItem: vi.fn(),
+  setItem: vi.fn(),
+  removeItem: vi.fn(),
+  clear: vi.fn(),
 }
 Object.defineProperty(window, 'sessionStorage', {
   value: sessionStorageMock,
@@ -62,123 +80,68 @@ Object.defineProperty(window, 'sessionStorage', {
 global.console = {
   ...console,
   // 保留error和warn用于调试
-  error: jest.fn(),
-  warn: jest.fn(),
+  error: vi.fn(),
+  warn: vi.fn(),
   // 静默其他方法
-  log: jest.fn(),
-  info: jest.fn(),
-  debug: jest.fn(),
+  log: vi.fn(),
+  info: vi.fn(),
+  debug: vi.fn(),
 }
-
-// Mock next/navigation (React 18+)
-jest.mock('next/navigation', () => ({
-  useRouter() {
-    return {
-      push: jest.fn(),
-      replace: jest.fn(),
-      prefetch: jest.fn(),
-      back: jest.fn(),
-      forward: jest.fn(),
-      refresh: jest.fn(),
-    }
-  },
-  useSearchParams() {
-    return new URLSearchParams()
-  },
-  usePathname() {
-    return '/'
-  },
-}))
 
 // Mock window.scrollTo
 Object.defineProperty(window, 'scrollTo', {
-  value: jest.fn(),
+  value: vi.fn(),
   writable: true,
 })
 
 // Mock HTMLCanvasElement
 Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
   value: () => ({
-    fillRect: jest.fn(),
-    clearRect: jest.fn(),
-    getImageData: jest.fn(() => ({
+    fillRect: vi.fn(),
+    clearRect: vi.fn(),
+    getImageData: vi.fn(() => ({
       data: new Array(4),
     })),
-    putImageData: jest.fn(),
-    createImageData: jest.fn(() => ({ data: new Array(4) })),
-    setTransform: jest.fn(),
-    drawImage: jest.fn(),
-    save: jest.fn(),
-    fillText: jest.fn(),
-    restore: jest.fn(),
-    beginPath: jest.fn(),
-    moveTo: jest.fn(),
-    lineTo: jest.fn(),
-    closePath: jest.fn(),
-    stroke: jest.fn(),
-    translate: jest.fn(),
-    scale: jest.fn(),
-    rotate: jest.fn(),
-    arc: jest.fn(),
-    fill: jest.fn(),
-    measureText: jest.fn(() => ({ width: 0 })),
-    transform: jest.fn(),
-    rect: jest.fn(),
-    clip: jest.fn(),
+    putImageData: vi.fn(),
+    createImageData: vi.fn(() => ({ data: new Array(4) })),
+    setTransform: vi.fn(),
+    drawImage: vi.fn(),
+    save: vi.fn(),
+    fillText: vi.fn(),
+    restore: vi.fn(),
+    beginPath: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    closePath: vi.fn(),
+    stroke: vi.fn(),
+    translate: vi.fn(),
+    scale: vi.fn(),
+    rotate: vi.fn(),
+    arc: vi.fn(),
+    fill: vi.fn(),
+    measureText: vi.fn(() => ({ width: 0 })),
+    transform: vi.fn(),
+    rect: vi.fn(),
+    clip: vi.fn(),
   }),
   writable: true,
 })
 
 // Mock URL.createObjectURL
 Object.defineProperty(URL, 'createObjectURL', {
-  value: jest.fn(() => 'mock-url'),
+  value: vi.fn(() => 'mock-url'),
   writable: true,
 })
 
 Object.defineProperty(URL, 'revokeObjectURL', {
-  value: jest.fn(),
+  value: vi.fn(),
   writable: true,
 })
 
-// Ant Design测试配置
-// Mock antd message
-jest.mock('antd', () => {
-  const antd = jest.requireActual('antd')
-  return {
-    ...antd,
-    message: {
-      success: jest.fn(),
-      error: jest.fn(),
-      warning: jest.fn(),
-      info: jest.fn(),
-      loading: jest.fn(),
-    },
-    notification: {
-      success: jest.fn(),
-      error: jest.fn(),
-      warning: jest.fn(),
-      info: jest.fn(),
-      open: jest.fn(),
-    },
-  }
-})
-
-// Mock dayjs
-jest.mock('dayjs', () => {
-  const originalDayjs = jest.requireActual('dayjs')
-  return (date?: any) => {
-    const dayjsInstance = originalDayjs(date)
-    return {
-      ...dayjsInstance,
-      format: jest.fn(() => '2024-01-01'),
-      valueOf: jest.fn(() => Date.now()),
-    }
-  }
-})
-
 // 清理函数
+import { afterEach } from 'vitest'
 afterEach(() => {
-  jest.clearAllMocks()
+  vi.clearAllMocks()
   localStorageMock.clear()
   sessionStorageMock.clear()
 })

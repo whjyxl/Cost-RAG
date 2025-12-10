@@ -24,7 +24,7 @@ const LoginForm: React.FC<LoginFormProps> = ({
   const [form] = Form.useForm()
 
   const [loginData, setLoginData] = useState<LoginRequest>({
-    username: '',
+    email: '',
     password: '',
     remember_me: false,
   })
@@ -78,150 +78,121 @@ const LoginForm: React.FC<LoginFormProps> = ({
   }
 
   return (
-    <div className="login-form-container">
-      <Card className="login-form-card">
-        <div className="login-form-header">
-          <div className="login-logo">
-            <div className="logo-icon">
-              <svg
-                width="48"
-                height="48"
-                viewBox="0 0 48 48"
-                fill="none"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <rect width="48" height="48" rx="12" fill="#2563eb" />
-                <path
-                  d="M24 12C17.3726 12 12 17.3726 12 24C12 30.6274 17.3726 36 24 36C30.6274 36 36 30.6274 36 24C36 17.3726 30.6274 12 24 12Z"
-                  fill="white"
-                />
-                <path
-                  d="M20 20H28V28H20V20Z"
-                  fill="#2563eb"
-                />
-              </svg>
-            </div>
-          </div>
-          <Title level={2} className="login-title">
-            Cost-RAG
-          </Title>
-          <Text type="secondary" className="login-subtitle">
-            工程造价咨询智能RAG系统
-          </Text>
-        </div>
+    <div className="login-form-wrapper">
+      <div className="login-form-header">
+        <Title level={3} className="login-form-title">
+          欢迎回来
+        </Title>
+        <Text type="secondary" className="login-form-subtitle">
+          请输入您的账户信息登录
+        </Text>
+      </div>
 
-        <Divider />
+      {renderError()}
 
-        {renderError()}
-
-        <Form
-          form={form}
-          name="login"
-          size="large"
-          onFinish={handleSubmit}
-          onValuesChange={handleValuesChange}
-          initialValues={loginData}
-          autoComplete="off"
-          className="login-form"
+      <Form
+        form={form}
+        name="login"
+        size="large"
+        onFinish={handleSubmit}
+        onValuesChange={handleValuesChange}
+        initialValues={loginData}
+        autoComplete="off"
+        className="login-form"
+      >
+        <Form.Item
+          name="email"
+          rules={[
+            {
+              required: true,
+              message: '请输入邮箱地址',
+            },
+            {
+              type: 'email',
+              message: '请输入有效的邮箱地址',
+            },
+          ]}
         >
-          <Form.Item
-            name="username"
-            rules={[
-              {
-                required: true,
-                message: '请输入用户名或邮箱',
-              },
-              {
-                type: 'string',
-                min: 3,
-                message: '用户名至少3个字符',
-              },
-            ]}
+          <Input
+            prefix={<UserOutlined />}
+            placeholder="邮箱地址"
+            autoComplete="email"
+          />
+        </Form.Item>
+
+        <Form.Item
+          name="password"
+          rules={[
+            {
+              required: true,
+              message: '请输入密码',
+            },
+            {
+              min: 6,
+              message: '密码至少6个字符',
+            },
+          ]}
+        >
+          <Input.Password
+            prefix={<LockOutlined />}
+            placeholder="密码"
+            autoComplete="current-password"
+            iconRender={(visible) =>
+              visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />
+            }
+          />
+        </Form.Item>
+
+        <Form.Item>
+          <div className="login-options">
+            <Form.Item name="remember_me" valuePropName="checked" noStyle>
+              <Checkbox>记住我</Checkbox>
+            </Form.Item>
+
+            {showForgotPasswordLink && (
+              <Link href="/forgot-password" className="forgot-password-link">
+                忘记密码？
+              </Link>
+            )}
+          </div>
+        </Form.Item>
+
+        <Form.Item>
+          <Button
+            type="primary"
+            htmlType="submit"
+            loading={isLoading}
+            block
+            className="login-button"
           >
-            <Input
-              prefix={<UserOutlined />}
-              placeholder="用户名或邮箱"
-              autoComplete="username"
-            />
-          </Form.Item>
+            {isLoading ? '登录中...' : '登录'}
+          </Button>
+        </Form.Item>
+      </Form>
 
-          <Form.Item
-            name="password"
-            rules={[
-              {
-                required: true,
-                message: '请输入密码',
-              },
-              {
-                min: 6,
-                message: '密码至少6个字符',
-              },
-            ]}
-          >
-            <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="密码"
-              autoComplete="current-password"
-              iconRender={(visible) =>
-                visible ? <EyeTwoTone /> : <EyeInvisibleOutlined />
-              }
-            />
-          </Form.Item>
-
-          <Form.Item>
-            <div className="login-options">
-              <Form.Item name="remember_me" valuePropName="checked" noStyle>
-                <Checkbox>记住我</Checkbox>
-              </Form.Item>
-
-              {showForgotPasswordLink && (
-                <Link href="/forgot-password" className="forgot-password-link">
-                  忘记密码？
-                </Link>
-              )}
-            </div>
-          </Form.Item>
-
-          <Form.Item>
-            <Button
-              type="primary"
-              htmlType="submit"
-              loading={isLoading}
-              block
-              className="login-button"
-            >
-              {isLoading ? '登录中...' : '登录'}
-            </Button>
-          </Form.Item>
-        </Form>
-
-        {showRegisterLink && (
-          <>
-            <Divider>或</Divider>
-            <div className="register-link">
-              <Text type="secondary">
-                还没有账号？
-                <Link href="/register" className="register-text">
-                  立即注册
-                </Link>
-              </Text>
-            </div>
-          </>
-        )}
-
-        <div className="login-footer">
-          <Text type="secondary" className="footer-text">
-            登录即表示您同意我们的
-            <Link href="/terms" target="_blank">
-              服务条款
-            </Link>
-            和
-            <Link href="/privacy" target="_blank">
-              隐私政策
+      {showRegisterLink && (
+        <div className="register-link">
+          <Text type="secondary">
+            还没有账号？
+            <Link href="/register" className="register-text">
+              立即注册
             </Link>
           </Text>
         </div>
-      </Card>
+      )}
+
+      <div className="login-footer">
+        <Text type="secondary" className="footer-text">
+          登录即表示您同意我们的
+          <Link href="/terms" target="_blank">
+            服务条款
+          </Link>
+          和
+          <Link href="/privacy" target="_blank">
+            隐私政策
+          </Link>
+        </Text>
+      </div>
     </div>
   )
 }

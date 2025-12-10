@@ -20,8 +20,13 @@ from app.schemas.document import (
 )
 from app.services.document_service import document_service
 from app.core.logging import logger
+from app.core.security import create_access_token
+import secrets
 
 router = APIRouter()
+
+# 临时预览token存储（生产环境应使用Redis）
+preview_tokens = {}
 
 
 @router.post("/upload", response_model=DocumentUploadResponse)
@@ -33,6 +38,7 @@ async def upload_document(
     tags: Optional[str] = Form(None),
     project_id: Optional[int] = Form(None),
     is_public: bool = Form(False),
+    generate_knowledge_graph: bool = Form(True),  # 是否生成知识图谱，默认为True
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -63,15 +69,16 @@ async def upload_document(
             file=file,
             user_id=current_user.id,
             document_data=document_data,
-            db=db
+            db=db,
+            generate_knowledge_graph=generate_knowledge_graph  # 传递知识图谱生成选项
         )
 
         return DocumentUploadResponse(
             document_id=document.id,
             filename=file.filename,
-            file_size=file.size if hasattr(file, 'size') else 0,
-            status="success",
-            message="文档上传成功，正在处理中"
+            file_size=int(document.file_size),  # 从Document模型获取文件大小
+            status="processing",  # 修改为processing状态，更准确反映文档正在后台处理
+            message="文档上传成功，正在后台处理中。请稍后刷新页面查看处理结果。"
         )
 
     except HTTPException:
@@ -107,18 +114,26 @@ async def get_documents(
         # 转换为摘要格式
         document_summaries = []
         for doc in documents:
+            raw_progress = getattr(doc, 'processing_progress', 0.0) or 0.0
+            # 兼容旧数据：如果进度在0-1之间，按百分比换算
+            progress = raw_progress * 100 if 0 < raw_progress <= 1 else raw_progress
+
             document_summaries.append({
                 "id": doc.id,
                 "title": doc.title,
-                "description": doc.description,
-                "category": doc.category,
-                "tags": doc.tags,
-                "file_type": doc.metadata.get('file_type', '') if doc.metadata else '',
-                "file_size": doc.metadata.get('file_size', 0) if doc.metadata else 0,
-                "processing_status": doc.processing_status.status,
-                "chunk_count": doc.chunk_count,
+                "description": doc.description or "",
+                "category": doc.category or "",
+                "tags": doc.tags or [],
+                "file_name": doc.file_name,
+                "file_type": doc.file_extension or "",
+                "file_size": doc.file_size or 0,
+                "mime_type": doc.mime_type or "",
+                "processing_status": doc.status or "pending",
+                "processing_progress": progress,
+                "chunk_count": getattr(doc, 'chunk_count', 0),
+                "vector_count": getattr(doc, 'vector_count', 0),
                 "created_at": doc.created_at,
-                "updated_at": doc.updated_at
+                "updated_at": doc.updated_at or doc.created_at
             })
 
         pages = (total + size - 1) // size
@@ -272,6 +287,106 @@ async def vector_search_documents(
         raise HTTPException(status_code=500, detail="向量搜索失败")
 
 
+@router.get("/{document_id}/preview-url")
+async def get_preview_url(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """生成临时预览URL"""
+    try:
+        # 验证文档权限
+        document = await document_service.get_document(
+            document_id=document_id,
+            user_id=current_user.id,
+            db=db
+        )
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        
+        # 生成临时token（5分钟有效）
+        token = secrets.token_urlsafe(32)
+        preview_tokens[token] = {
+            'document_id': document_id,
+            'expires_at': time.time() + 300  # 5分钟
+        }
+        
+        # 返回预览URL
+        preview_url = f"/api/v1/documents/preview/{token}"
+        return {
+            'preview_url': preview_url,
+            'expires_in': 300
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"生成预览URL失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="生成预览URL失败")
+
+
+@router.get("/preview/{token}")
+async def preview_document(
+    token: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """通过临时token预览文档（无需认证）"""
+    try:
+        # 验证token
+        if token not in preview_tokens:
+            raise HTTPException(status_code=404, detail="预览链接无效")
+        
+        token_data = preview_tokens[token]
+        
+        # 检查是否过期
+        if time.time() > token_data['expires_at']:
+            del preview_tokens[token]
+            raise HTTPException(status_code=410, detail="预览链接已过期")
+        
+        document_id = token_data['document_id']
+        
+        # 获取文档（不验证用户权限）
+        from sqlalchemy import select
+        from app.models.document import Document as DocumentModel
+        
+        result = await db.execute(
+            select(DocumentModel).where(DocumentModel.id == document_id)
+        )
+        document = result.scalar_one_or_none()
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="文档不存在")
+        
+        import os
+        if not os.path.exists(document.file_path):
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        def iterfile(file_path: str):
+            with open(file_path, mode="rb") as file_like:
+                yield from file_like
+        
+        from urllib.parse import quote
+        
+        filename = document.file_name or f'document_{document_id}'
+        encoded_filename = quote(filename)
+        file_type = document.mime_type or 'application/octet-stream'
+        
+        return StreamingResponse(
+            iterfile(document.file_path),
+            media_type=file_type,
+            headers={
+                "Content-Disposition": f"inline; filename*=UTF-8''{encoded_filename}"
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"预览文档失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="预览失败")
+
+
 @router.get("/{document_id}/download")
 async def download_document(
     document_id: int,
@@ -297,13 +412,19 @@ async def download_document(
             with open(file_path, mode="rb") as file_like:
                 yield from file_like
 
-        filename = document.metadata.get('filename', f'document_{document_id}') if document.metadata else f'document_{document_id}'
-        file_type = document.metadata.get('file_type', '') if document.metadata else ''
+        from urllib.parse import quote
+        
+        filename = document.file_name or f'document_{document_id}'
+        # URL编码文件名以支持中文
+        encoded_filename = quote(filename)
+        file_type = document.mime_type or 'application/octet-stream'
 
         return StreamingResponse(
             iterfile(document.file_path),
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            media_type=file_type,
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"
+            }
         )
 
     except HTTPException:
@@ -358,11 +479,8 @@ async def get_document_chunks(
                 {
                     "chunk_index": chunk.chunk_index,
                     "content": chunk.content,
-                    "start_position": chunk.start_position,
-                    "end_position": chunk.end_position,
-                    "word_count": chunk.word_count,
-                    "char_count": chunk.char_count,
-                    "vector_id": chunk.vector_id
+                    "start_char": chunk.start_char,
+                    "end_char": chunk.end_char
                 }
                 for chunk in chunks
             ],
@@ -495,11 +613,9 @@ async def get_document_processing_status(
 
         return {
             "document_id": document_id,
-            "status": document.processing_status.status,
-            "progress": document.processing_status.progress,
-            "error_message": document.processing_status.error_message,
-            "started_at": document.processing_status.started_at,
-            "completed_at": document.processing_status.completed_at
+            "status": document.status or 'pending',
+            "progress": document.processing_progress or 0.0,
+            "error_message": document.error_message
         }
 
     except HTTPException:
@@ -507,3 +623,91 @@ async def get_document_processing_status(
     except Exception as e:
         logger.error(f"获取文档状态API错误: {str(e)}")
         raise HTTPException(status_code=500, detail="获取文档状态失败")
+
+
+@router.get("/{document_id}/content")
+async def get_document_content(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """提取文档内容"""
+    try:
+        from app.models.document import DocumentChunk
+        from sqlalchemy import select
+
+        # 验证文档存在
+        document = await document_service.get_document(
+            document_id=document_id,
+            user_id=current_user.id,
+            db=db
+        )
+
+        if not document:
+            raise HTTPException(status_code=404, detail="文档不存在")
+
+        # 获取所有分块
+        chunks_query = select(DocumentChunk).where(
+            DocumentChunk.document_id == document_id
+        ).order_by(DocumentChunk.chunk_index)
+        chunks_result = await db.execute(chunks_query)
+        chunks = chunks_result.scalars().all()
+
+        return {
+            "document_id": document_id,
+            "title": document.title,
+            "chunks": [
+                {
+                    "chunk_index": chunk.chunk_index,
+                    "content": chunk.content
+                }
+                for chunk in chunks
+            ]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"提取文档内容API错误: {str(e)}")
+        raise HTTPException(status_code=500, detail="提取文档内容失败")
+
+
+@router.put("/{document_id}/tags")
+async def update_document_tags(
+    document_id: int,
+    tags_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """更新文档标签"""
+    try:
+        # 验证文档存在
+        document = await document_service.get_document(
+            document_id=document_id,
+            user_id=current_user.id,
+            db=db
+        )
+
+        if not document:
+            raise HTTPException(status_code=404, detail="文档不存在")
+
+        # 更新标签
+        new_tags = tags_data.get('tags', [])
+        if not isinstance(new_tags, list):
+            raise HTTPException(status_code=400, detail="标签必须是数组格式")
+
+        document.tags = new_tags
+        await db.commit()
+        await db.refresh(document)
+
+        return {
+            "document_id": document_id,
+            "tags": document.tags,
+            "message": "标签更新成功"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新文档标签API错误: {str(e)}")
+        raise HTTPException(status_code=500, detail="更新文档标签失败")
